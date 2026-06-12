@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* тач-касса: без выделения текста и тапхайлайта */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  background: #1f1f1f;
+}
+
+@layer components {
+  /* крупная сенсорная кнопка-плитка */
+  .tile {
+    @apply flex items-center justify-center text-center rounded-md select-none cursor-pointer
+           transition active:scale-[0.98] text-white font-medium leading-tight px-2;
+  }
+  .tile-group {
+    @apply bg-pos-blue hover:bg-pos-blueDark text-white text-xl;
+  }
+  .tile-dish {
+    @apply text-sm text-gray-900;
+  }
+  .btn-bar {
+    @apply flex flex-col items-center justify-center gap-1 text-xs font-semibold
+           text-gray-700 cursor-pointer select-none active:scale-95;
+  }
+  .pad-key {
+    @apply flex items-center justify-center text-2xl font-semibold rounded-md bg-white
+           border border-gray-300 cursor-pointer active:bg-gray-100 select-none;
+  }
+}

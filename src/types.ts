@@ -1,0 +1,225 @@
+// Доменные типы кассы (мок). KZ валюта — тенге ₸, НДС (ҚҚС) 16%.
+
+export type VatRate = 16 | 0 // основная / без НДС
+
+export interface ModifierOption {
+  id: string
+  name: string
+  price: number // ₸, 0 = бесплатный
+}
+
+export interface ModifierGroup {
+  id: string
+  name: string
+  min: number
+  max: number
+  options: ModifierOption[]
+}
+
+export interface Dish {
+  id: string
+  name: string
+  code: string // артикул/код для поиска и сканера
+  price: number // ₸
+  vat: VatRate
+  groupId: string
+  color?: string // цвет плитки
+  modifierGroupIds?: string[]
+  isWeight?: boolean
+  // метод списания со склада (iiko): 'ingredients' = по техкарте, 'finished' = как готовое блюдо.
+  // не задан → услуга/без склада (не списывается).
+  writeoffMethod?: 'ingredients' | 'finished'
+}
+
+// ───────── склад (iikoOperation): товары-ингредиенты + техкарты ─────────
+export type Unit = 'кг' | 'л' | 'шт'
+
+// Товар-ингредиент на складе (номенклатура типа «Товар»). Остаток убывает при продаже блюд.
+export interface Ingredient {
+  id: string
+  code: string         // артикул
+  name: string
+  unit: Unit
+  stock: number        // текущий остаток на складе
+  costPerUnit: number  // себестоимость за единицу, ₸ (оценочная)
+  min: number          // минимальный остаток (ниже — предупреждение)
+}
+
+// Строка техкарты (ТТК): сколько ингредиента (брутто) уходит на 1 порцию блюда.
+export interface TechCardItem {
+  ingredientId: string
+  gross: number        // норма закладки, брутто, в ед. ингредиента
+}
+
+export interface MenuGroup {
+  id: string
+  name: string
+  page: 1 | 2 | 3 // закладка быстрого меню I/II/III
+}
+
+export interface SelectedModifier {
+  optionId: string
+  name: string
+  price: number
+  qty: number
+}
+
+export interface OrderLine {
+  uid: string // уникальный id строки заказа
+  dishId: string
+  name: string
+  price: number // цена за единицу (без модификаторов)
+  vat: VatRate
+  qty: number
+  modifiers: SelectedModifier[]
+  guestNo?: number // для деления между гостями
+}
+
+export type OrderType = 'dinein' | 'takeaway' | 'delivery'
+
+export interface Order {
+  id: number
+  tableId: string | null // null = быстрый чек
+  hallId: string | null
+  guests: number
+  waiter: string
+  type: OrderType
+  lines: OrderLine[]
+  discountPct: number
+  surchargePct: number
+  openedAt: string
+  status: 'open' | 'precheck' | 'paid'
+}
+
+export type PaymentKind = 'cash' | 'card' | 'noRevenue' | 'cashless' | 'bonus'
+
+export interface PaymentType {
+  id: string
+  name: string
+  kind: PaymentKind
+}
+
+export interface PaymentSplit {
+  paymentTypeId: string
+  name: string
+  amount: number
+}
+
+export interface ClosedOrder extends Order {
+  paidAt: string
+  payments: PaymentSplit[]
+  change: number
+  total: number
+  fiscalDocNo: string // номер фискального документа (Webkassa, мок)
+  tip?: number        // чаевые (для отчёта 054), ₸ — сверх суммы чека
+  staffMeal?: boolean // питание персонала (оплата «Без выручки», отчёт 032)
+}
+
+// Акт списания блюда со склада (для отчётов 024/034 «Списания блюд»).
+export interface WriteOff {
+  id: number
+  dishId: string
+  name: string
+  qty: number
+  reason: string // причина: бой/порча/проработка/дегустация
+  cost: number   // себестоимость списания, ₸
+  at: string
+}
+
+export interface Staff {
+  id: string
+  name: string
+  pin: string
+  positions: string[]
+}
+
+export interface Table {
+  id: string
+  hallId: string
+  no: string
+  seats: number
+  x: number // позиция на схеме (грид)
+  y: number
+}
+
+export interface Hall {
+  id: string
+  name: string
+}
+
+export interface CashShift {
+  no: number
+  openedAt: string
+  openedBy: string
+  closedAt?: string
+}
+
+// Профиль заведения (в реальной айке приходит из офиса: режим терминала + настройки ТП + лицензии).
+// У нас — задаётся на экране «Настройки заведения», управляет видимостью кнопок по всему фронту.
+export type ServiceMode = 'restaurant' | 'fastfood'
+export interface Establishment {
+  name: string
+  mode: ServiceMode
+  precheck: boolean      // печать пречека (ресторан)
+  comments: boolean      // комментарии к заказу/блюду
+  courses: boolean       // курсы подачи
+  tab: boolean           // барный таб
+  mix: boolean           // составное/комбо (MIX)
+  kitchenScreen: boolean // кухонный экран → «Вне очереди», печать на кухню
+  banquets: boolean      // банкеты и резервы
+  delivery: boolean      // доставка (iikoDelivery)
+  iikoCard: boolean      // лояльность
+  frCount: 1 | 2         // число фискальных регистраторов
+}
+
+export interface ClosedShift {
+  no: number
+  openedAt: string
+  closedAt: string
+  orders: ClosedOrder[]
+  revenue: number
+}
+
+export interface CashMovement {
+  id: number
+  kind: 'in' | 'out' // внесение / изъятие
+  type: string // тип внесения/изъятия
+  amount: number
+  comment: string
+  at: string
+}
+
+export interface Refund {
+  id: number
+  orderId: number
+  fiscalDocNo: string // номер возвратного чека (мок Webkassa)
+  amount: number
+  full: boolean
+  lineUids: string[] // какие позиции вернули (для частичного)
+  at: string
+  by: string
+}
+
+export type BanquetType = 'Банкет' | 'Резерв'
+export type BanquetStatus = 'Действует' | 'Гость пришёл' | 'Снят'
+
+export interface Banquet {
+  id: number
+  type: BanquetType
+  status: BanquetStatus
+  hallId: string
+  tableId: string
+  date: string
+  time: string
+  guests: number
+  clientName: string
+  clientPhone: string
+  comment: string
+  prepayment: number // предоплата (для банкета)
+}
+
+export interface PersonalShift {
+  staffId: string
+  position: string
+  openedAt: string
+}

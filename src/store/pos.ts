@@ -1,0 +1,460 @@
+import { create } from 'zustand'
+import type {
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift,
+  SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
+  Ingredient, WriteOff,
+} from '../types'
+import { findDish } from '../mock/menu'
+import { findStaffByPin, initialBanquets } from '../mock/data'
+import { baseIngredients, applyWriteoff } from '../mock/warehouse'
+import { buildDemo } from '../mock/demo'
+
+// ───────────────────────────── helpers ─────────────────────────────
+const now = () => new Date().toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+const fullNow = () => new Date().toLocaleString('ru-RU')
+let uidSeq = 1
+const nextUid = () => `l${uidSeq++}`
+
+// Профиль по умолчанию — 🇰🇿 ресторан со столами.
+const DEFAULT_ESTABLISHMENT: Establishment = {
+  name: 'Ресторан (KZ)', mode: 'restaurant',
+  precheck: true, comments: true, courses: true, tab: false, mix: false,
+  kitchenScreen: false, banquets: true, delivery: false, iikoCard: false, frCount: 1,
+}
+function loadEstablishment(): Establishment {
+  try {
+    const raw = localStorage.getItem('iiko-establishment')
+    if (raw) return { ...DEFAULT_ESTABLISHMENT, ...JSON.parse(raw) }
+  } catch { /* ignore */ }
+  return DEFAULT_ESTABLISHMENT
+}
+
+// Остатки склада: база из warehouse.ts, поверх — сохранённые остатки из localStorage (id → stock).
+function loadIngredients(): Ingredient[] {
+  try {
+    const raw = localStorage.getItem('iiko-stock')
+    if (raw) {
+      const saved = JSON.parse(raw) as Record<string, number>
+      return baseIngredients.map((i) => (i.id in saved ? { ...i, stock: saved[i.id] } : i))
+    }
+  } catch { /* ignore */ }
+  return baseIngredients.map((i) => ({ ...i }))
+}
+function persistIngredients(ings: Ingredient[]) {
+  try {
+    const map: Record<string, number> = {}
+    for (const i of ings) map[i.id] = i.stock
+    localStorage.setItem('iiko-stock', JSON.stringify(map))
+  } catch { /* ignore */ }
+}
+
+// Авто-наполнение демо-заказами при запуске (для показа заказчику). Флаг в localStorage.
+function loadDemoAuto(): boolean {
+  try { return localStorage.getItem('iiko-demo-auto') === '1' } catch { return false }
+}
+const DEMO_AUTO = loadDemoAuto()
+const DEMO_INIT = DEMO_AUTO
+  ? buildDemo({ count: 24, openCount: 4, startFiscal: 3681821000, startOrderId: 184, startMovement: 0 })
+  : null
+
+export const lineUnitPrice = (l: OrderLine): number =>
+  l.price + l.modifiers.reduce((s, m) => s + m.price * m.qty, 0)
+export const lineTotal = (l: OrderLine): number => lineUnitPrice(l) * l.qty
+
+export const orderSubtotal = (o: Order): number => o.lines.reduce((s, l) => s + lineTotal(l), 0)
+export const orderTotal = (o: Order): number => {
+  const sub = orderSubtotal(o)
+  return +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)).toFixed(2)
+}
+
+// ───────────────────────────── state ─────────────────────────────
+interface PosState {
+  staffList: Staff[]
+  user: Staff | null
+  personalShift: PersonalShift | null
+  cashShift: CashShift | null
+  cashShiftSeq: number
+
+  orders: Order[]
+  closedOrders: ClosedOrder[]
+  currentOrderId: number | null
+  orderSeq: number
+  fiscalSeq: number
+
+  cashMovements: CashMovement[]
+  refunds: Refund[]
+  writeOffs: WriteOff[] // акты списания блюд (для отчётов 024/034/037)
+  banquets: Banquet[]
+  closedShifts: ClosedShift[] // архив закрытых кассовых смен
+  stopList: string[] // dishId, снятые с продажи (стоп-лист)
+  ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
+  establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
+  demoAuto: boolean // авто-наполнение демо-заказами при запуске
+  movementSeq: number
+  refundSeq: number
+  banquetSeq: number
+
+  // auth / shifts
+  login: (pin: string) => Staff | null
+  logout: () => void
+  openPersonalShift: (position: string) => void
+  closePersonalShift: () => void
+  openCashShift: () => void
+  closeCashShift: () => void
+
+  // orders
+  startOrder: (opts: { tableId: string | null; hallId: string | null; guests: number; type?: OrderType }) => number
+  openExistingOrder: (id: number) => void
+  currentOrder: () => Order | null
+  addDish: (dishId: string, modifiers?: SelectedModifier[], guestNo?: number) => void
+  addGuest: (orderId: number) => void
+  incLine: (uid: string) => void
+  decLine: (uid: string) => void
+  setLineQty: (uid: string, qty: number) => void
+  removeLine: (uid: string) => void
+  setGuestNo: (uid: string, guestNo: number | undefined) => void
+  setDiscount: (pct: number) => void
+  setSurcharge: (pct: number) => void
+  precheck: () => void
+  pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
+  payByGuest: (guestNo: number, payments: PaymentSplit[], received: number) => ClosedOrder | null
+
+  // деньги, возвраты, перенос, банкеты
+  addCashMovement: (kind: 'in' | 'out', type: string, amount: number, comment: string) => void
+  refundOrder: (receiptNo: string, lineUids: string[] | 'all') => Refund | null
+  changePaymentType: (receiptNo: string, payments: PaymentSplit[]) => void
+  moveOrderToTable: (orderId: number, tableId: string, hallId: string) => void
+  mergeOrderInto: (sourceId: number, targetId: number) => void
+  addBanquet: (b: Omit<Banquet, 'id' | 'status'>) => void
+  setBanquetStatus: (id: number, status: BanquetStatus) => void
+  toggleStop: (dishId: string) => void
+  setEstablishment: (patch: Partial<Establishment>) => void
+
+  // склад
+  receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
+  setIngredientStock: (ingredientId: string, qty: number) => void // инвентаризация (выставить факт)
+  resetStock: () => void // вернуть стартовые остатки
+
+  // демо-данные (для показа без бэка)
+  seedDemo: (count?: number) => void   // сгенерировать закрытые+открытые заказы за сегодня
+  clearDemo: () => void                // очистить все заказы/возвраты/внесения
+  setDemoAuto: (on: boolean) => void   // авто-наполнение при запуске
+}
+
+export const usePos = create<PosState>((set, get) => ({
+  staffList: [],
+  user: null,
+  personalShift: null,
+  cashShift: DEMO_INIT ? { no: 108, openedAt: fullNow(), openedBy: 'Петров К.С.' } : null,
+  cashShiftSeq: 108,
+  orders: DEMO_INIT?.orders ?? [],
+  closedOrders: DEMO_INIT?.closedOrders ?? [],
+  currentOrderId: null,
+  orderSeq: DEMO_INIT?.orderSeq ?? 184,
+  fiscalSeq: DEMO_INIT?.fiscalSeq ?? 3681821000,
+  cashMovements: DEMO_INIT?.cashMovements ?? [],
+  refunds: [],
+  writeOffs: DEMO_INIT?.writeOffs ?? [],
+  banquets: initialBanquets,
+  closedShifts: [],
+  stopList: [],
+  ingredients: loadIngredients(),
+  establishment: loadEstablishment(),
+  demoAuto: DEMO_AUTO,
+  movementSeq: DEMO_INIT?.movementSeq ?? 0,
+  refundSeq: 0,
+  banquetSeq: initialBanquets.length,
+
+  login: (pin) => {
+    const s = findStaffByPin(pin) ?? null
+    if (s) set({ user: s })
+    return s
+  },
+  logout: () => set({ user: null, personalShift: null, currentOrderId: null }),
+
+  openPersonalShift: (position) => {
+    const u = get().user
+    if (!u) return
+    set({ personalShift: { staffId: u.id, position, openedAt: fullNow() } })
+  },
+  closePersonalShift: () => set({ personalShift: null, currentOrderId: null }),
+
+  openCashShift: () => {
+    const u = get().user
+    set((st) => ({ cashShift: { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: u?.name ?? '' } }))
+  },
+  closeCashShift: () =>
+    set((st) => {
+      const archived: ClosedShift | null = st.cashShift
+        ? {
+            no: st.cashShift.no,
+            openedAt: st.cashShift.openedAt,
+            closedAt: fullNow(),
+            orders: st.closedOrders,
+            revenue: st.closedOrders.reduce((s, o) => s + o.total, 0),
+          }
+        : null
+      return {
+        cashShift: null,
+        cashShiftSeq: st.cashShiftSeq + 1,
+        // архивируем смену и сбрасываем оперативные данные под новую смену
+        closedShifts: archived ? [archived, ...st.closedShifts] : st.closedShifts,
+        closedOrders: [],
+        cashMovements: [],
+        refunds: [],
+        // незакрытые заказы переносятся (в моке просто остаются)
+      }
+    }),
+
+  startOrder: ({ tableId, hallId, guests, type = 'dinein' }) => {
+    const id = get().orderSeq + 1
+    const order: Order = {
+      id, tableId, hallId, guests,
+      waiter: get().user?.name ?? '',
+      type,
+      lines: [], discountPct: 0, surchargePct: 0,
+      openedAt: now(), status: 'open',
+    }
+    set((st) => ({ orders: [...st.orders, order], orderSeq: id, currentOrderId: id }))
+    return id
+  },
+  openExistingOrder: (id) => set({ currentOrderId: id }),
+
+  currentOrder: () => {
+    const { orders, currentOrderId } = get()
+    return orders.find((o) => o.id === currentOrderId) ?? null
+  },
+
+  addDish: (dishId, modifiers = [], guestNo) => {
+    const dish = findDish(dishId)
+    const id = get().currentOrderId
+    if (!dish || id == null) return
+    set((st) => ({
+      orders: st.orders.map((o) => {
+        if (o.id !== id) return o
+        // та же позиция без модификаторов И того же гостя уже есть — +1
+        if (modifiers.length === 0) {
+          const existing = o.lines.find((l) => l.dishId === dishId && l.modifiers.length === 0 && l.guestNo === guestNo)
+          if (existing) {
+            return { ...o, lines: o.lines.map((l) => (l.uid === existing.uid ? { ...l, qty: l.qty + 1 } : l)) }
+          }
+        }
+        const line: OrderLine = {
+          uid: nextUid(), dishId, name: dish.name, price: dish.price, vat: dish.vat, qty: 1, modifiers, guestNo,
+        }
+        return { ...o, lines: [...o.lines, line] }
+      }),
+    }))
+  },
+
+  addGuest: (orderId) =>
+    set((st) => ({ orders: st.orders.map((o) => (o.id === orderId ? { ...o, guests: o.guests + 1 } : o)) })),
+
+  incLine: (uid) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, qty: l.qty + 1 } : l)) } : o),
+  })),
+  decLine: (uid) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, qty: Math.max(1, l.qty - 1) } : l)) } : o),
+  })),
+  setLineQty: (uid, qty) => set((st) => ({
+    // допускаем дробные количества (0,25 / 0,5 / 1,33 …) для весовых/штучных позиций
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, qty: qty > 0 ? qty : l.qty } : l)) } : o),
+  })),
+  removeLine: (uid) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.filter((l) => l.uid !== uid) } : o),
+  })),
+  setGuestNo: (uid, guestNo) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, guestNo } : l)) } : o),
+  })),
+  setDiscount: (pct) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, discountPct: pct } : o)),
+  })),
+  setSurcharge: (pct) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, surchargePct: pct } : o)),
+  })),
+  precheck: () => set((st) => ({
+    orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
+  })),
+
+  pay: (payments, received) => {
+    const o = get().currentOrder()
+    if (!o) return null
+    const total = orderTotal(o)
+    const paid = payments.reduce((s, p) => s + p.amount, 0)
+    const change = Math.max(0, received - total)
+    const fiscalDocNo = String(get().fiscalSeq + 1)
+    const closed: ClosedOrder = {
+      ...o, status: 'paid', paidAt: fullNow(), payments, change, total, fiscalDocNo,
+    }
+    set((st) => {
+      // списание ингредиентов по техкарте (аналог Акта реализации iiko)
+      const ingredients = applyWriteoff(st.ingredients, o.lines)
+      persistIngredients(ingredients)
+      return {
+        closedOrders: [closed, ...st.closedOrders],
+        orders: st.orders.filter((x) => x.id !== o.id),
+        currentOrderId: null,
+        fiscalSeq: st.fiscalSeq + 1,
+        ingredients,
+      }
+    })
+    return closed
+  },
+
+  payByGuest: (guestNo, payments, received) => {
+    const o = get().currentOrder()
+    if (!o) return null
+    const mine = o.lines.filter((l) => l.guestNo === guestNo)
+    if (mine.length === 0) return null
+    const rest = o.lines.filter((l) => l.guestNo !== guestNo)
+    const sub = mine.reduce((s, l) => s + lineTotal(l), 0)
+    const total = +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)).toFixed(2)
+    const change = Math.max(0, received - total)
+    const fiscalDocNo = String(get().fiscalSeq + 1)
+    const closed: ClosedOrder = {
+      ...o, lines: mine, status: 'paid', paidAt: fullNow(), payments, change, total, fiscalDocNo,
+    }
+    set((st) => {
+      // списываем только оплаченные позиции гостя
+      const ingredients = applyWriteoff(st.ingredients, mine)
+      persistIngredients(ingredients)
+      return {
+        closedOrders: [closed, ...st.closedOrders],
+        fiscalSeq: st.fiscalSeq + 1,
+        ingredients,
+        // оставшиеся гости — в заказе; если никого не осталось, заказ закрыт
+        orders: rest.length === 0
+          ? st.orders.filter((x) => x.id !== o.id)
+          : st.orders.map((x) => (x.id === o.id ? { ...x, lines: rest } : x)),
+        currentOrderId: rest.length === 0 ? null : st.currentOrderId,
+      }
+    })
+    return closed
+  },
+
+  addCashMovement: (kind, type, amount, comment) =>
+    set((st) => ({
+      cashMovements: [
+        { id: st.movementSeq + 1, kind, type, amount, comment, at: fullNow() },
+        ...st.cashMovements,
+      ],
+      movementSeq: st.movementSeq + 1,
+    })),
+
+  refundOrder: (receiptNo, lineUids) => {
+    const closed = get().closedOrders.find((o) => o.fiscalDocNo === receiptNo)
+    if (!closed) return null
+    const full = lineUids === 'all'
+    const uids = full ? closed.lines.map((l) => l.uid) : lineUids
+    const amount = full
+      ? closed.total
+      : closed.lines.filter((l) => uids.includes(l.uid)).reduce((s, l) => s + lineTotal(l), 0)
+    const refund: Refund = {
+      id: get().refundSeq + 1,
+      orderId: closed.id,
+      fiscalDocNo: String(get().fiscalSeq + 1),
+      amount, full, lineUids: uids, at: fullNow(), by: get().user?.name ?? '',
+    }
+    set((st) => ({
+      refunds: [refund, ...st.refunds],
+      refundSeq: st.refundSeq + 1,
+      fiscalSeq: st.fiscalSeq + 1,
+      // в моке уменьшаем сумму чека на возвращённое (полный возврат → 0)
+      closedOrders: st.closedOrders.map((o) =>
+        o.fiscalDocNo === receiptNo ? { ...o, total: full ? 0 : +(o.total - amount).toFixed(2) } : o),
+    }))
+    return refund
+  },
+
+  changePaymentType: (receiptNo, payments) =>
+    set((st) => ({
+      closedOrders: st.closedOrders.map((o) => (o.fiscalDocNo === receiptNo ? { ...o, payments } : o)),
+    })),
+
+  moveOrderToTable: (orderId, tableId, hallId) =>
+    set((st) => ({
+      orders: st.orders.map((o) => (o.id === orderId ? { ...o, tableId, hallId } : o)),
+    })),
+
+  mergeOrderInto: (sourceId, targetId) =>
+    set((st) => {
+      const src = st.orders.find((o) => o.id === sourceId)
+      const tgt = st.orders.find((o) => o.id === targetId)
+      if (!src || !tgt) return {}
+      return {
+        orders: st.orders
+          .filter((o) => o.id !== sourceId)
+          .map((o) => (o.id === targetId ? { ...o, lines: [...o.lines, ...src.lines] } : o)),
+        currentOrderId: targetId,
+      }
+    }),
+
+  addBanquet: (b) =>
+    set((st) => ({
+      banquets: [{ ...b, id: st.banquetSeq + 1, status: 'Действует' }, ...st.banquets],
+      banquetSeq: st.banquetSeq + 1,
+    })),
+
+  setBanquetStatus: (id, status) =>
+    set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, status } : b)) })),
+
+  toggleStop: (dishId) =>
+    set((st) => ({
+      stopList: st.stopList.includes(dishId)
+        ? st.stopList.filter((d) => d !== dishId)
+        : [...st.stopList, dishId],
+    })),
+
+  setEstablishment: (patch) => set((st) => {
+    const next = { ...st.establishment, ...patch }
+    try { localStorage.setItem('iiko-establishment', JSON.stringify(next)) } catch { /* ignore */ }
+    return { establishment: next }
+  }),
+
+  receiveStock: (ingredientId, qty) => set((st) => {
+    const ingredients = st.ingredients.map((i) =>
+      i.id === ingredientId ? { ...i, stock: +(i.stock + qty).toFixed(3) } : i)
+    persistIngredients(ingredients)
+    return { ingredients }
+  }),
+  setIngredientStock: (ingredientId, qty) => set((st) => {
+    const ingredients = st.ingredients.map((i) =>
+      i.id === ingredientId ? { ...i, stock: +qty.toFixed(3) } : i)
+    persistIngredients(ingredients)
+    return { ingredients }
+  }),
+  resetStock: () => set(() => {
+    const ingredients = baseIngredients.map((i) => ({ ...i }))
+    persistIngredients(ingredients)
+    return { ingredients }
+  }),
+
+  seedDemo: (count = 24) => set((st) => {
+    const d = buildDemo({
+      count, openCount: 4,
+      startFiscal: st.fiscalSeq, startOrderId: st.orderSeq, startMovement: st.movementSeq,
+    })
+    return {
+      cashShift: st.cashShift ?? { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: st.user?.name ?? 'Петров К.С.' },
+      orders: d.orders,
+      closedOrders: d.closedOrders,
+      cashMovements: d.cashMovements,
+      writeOffs: d.writeOffs,
+      refunds: [],
+      currentOrderId: null,
+      fiscalSeq: d.fiscalSeq,
+      orderSeq: d.orderSeq,
+      movementSeq: d.movementSeq,
+    }
+  }),
+  clearDemo: () => set({ orders: [], closedOrders: [], cashMovements: [], writeOffs: [], refunds: [], currentOrderId: null }),
+  setDemoAuto: (on) => {
+    try { localStorage.setItem('iiko-demo-auto', on ? '1' : '0') } catch { /* ignore */ }
+    set({ demoAuto: on })
+  },
+}))
