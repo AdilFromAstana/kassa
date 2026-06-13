@@ -6,7 +6,7 @@ import { usePos } from '../store/pos'
 import { warehouses } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
-import type { DocType, DocLine } from '../types'
+import type { DocType, DocLine, StoreDoc } from '../types'
 
 // «Документы» на кассе (iikoFront) — складские документы: акт списания/приготовления/переработки,
 // внутреннее перемещение, расходная накладная, инвентаризация. Приходной накладной на терминале нет (офис).
@@ -25,6 +25,7 @@ export default function DocumentsScreen() {
   const [toStore, setToStore] = useState(warehouses[1])
   const [resultId, setResultId] = useState(ingredients[0]?.id ?? '')
   const [resultQty, setResultQty] = useState('')
+  const [viewDoc, setViewDoc] = useState<StoreDoc | null>(null) // открытый документ из истории
 
   const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty('') }
   const isInv = type === 'Инвентаризация'
@@ -80,7 +81,8 @@ export default function DocumentsScreen() {
                 <thead className="text-white/50 text-left"><tr><th className="p-2">№</th><th>Тип</th><th>Склад</th><th>Дата</th><th>Кто</th><th className="text-right">Позиций</th></tr></thead>
                 <tbody>
                   {documents.map((d) => (
-                    <tr key={d.id} className="border-b border-white/10">
+                    <tr key={d.id} onClick={() => setViewDoc(d)}
+                      className="border-b border-white/10 cursor-pointer hover:bg-white/5" title="Открыть документ">
                       <td className="p-2">{d.id}</td>
                       <td>{d.type}{d.reason ? ` · ${d.reason}` : ''}{d.result ? ` → ${d.result}` : ''}</td>
                       <td>{d.toStore ? `${d.store} → ${d.toStore}` : d.store}</td>
@@ -92,6 +94,7 @@ export default function DocumentsScreen() {
                 </tbody>
               </table>
             )}
+            {documents.length > 0 && <div className="text-white/40 text-xs mt-2">Нажмите документ, чтобы открыть и распечатать.</div>}
           </>
         ) : (
           <div className="max-w-2xl">
@@ -205,6 +208,72 @@ export default function DocumentsScreen() {
       <div className="h-16 bg-white text-gray-700 flex items-center px-4">
         <BackButton onClick={() => navigate('/menu')} />
       </div>
+
+      {viewDoc && (() => {
+        const d = viewDoc
+        const isInvDoc = d.type === 'Инвентаризация'
+        const total = d.lines.reduce((s, l) => s + (ingredients.find((i) => i.id === l.ingredientId)?.costPerUnit ?? 0) * l.qty, 0)
+        return (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setViewDoc(null)}>
+            <div className="bg-white text-gray-800 rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-3 border-b flex items-center">
+                <div>
+                  <div className="font-semibold">{d.type} №{d.id}</div>
+                  <div className="text-xs text-gray-500">{d.at} · {d.by}</div>
+                </div>
+                <button onClick={() => setViewDoc(null)} className="ml-auto text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+              </div>
+              <div className="px-5 py-3 text-sm space-y-1">
+                <div><span className="text-gray-500">Склад: </span>{d.toStore ? `${d.store} → ${d.toStore}` : d.store}</div>
+                {d.reason && <div><span className="text-gray-500">Причина: </span>{d.reason}</div>}
+                {d.result && <div><span className="text-gray-500">Результат: </span>{d.result}</div>}
+              </div>
+              <div className="flex-1 overflow-auto px-5">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-400 text-left border-b">
+                    <tr>
+                      <th className="py-1">Товар</th>
+                      {isInvDoc ? <><th className="text-right py-1">Учётный</th><th className="text-right py-1">Факт</th><th className="text-right py-1">Откл.</th></>
+                        : <><th className="text-right py-1">Кол-во</th><th className="text-right py-1">Себест.</th></>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.lines.map((l) => {
+                      const dev = +(l.qty - (l.booked ?? 0)).toFixed(3)
+                      const cost = (ingredients.find((i) => i.id === l.ingredientId)?.costPerUnit ?? 0) * l.qty
+                      return (
+                        <tr key={l.ingredientId} className="border-b border-gray-100">
+                          <td className="py-1">{l.name}</td>
+                          {isInvDoc ? (
+                            <>
+                              <td className="text-right text-gray-500">{l.booked ?? 0} {l.unit}</td>
+                              <td className="text-right">{l.qty} {l.unit}</td>
+                              <td className={`text-right ${dev === 0 ? 'text-gray-400' : dev < 0 ? 'text-pos-rose' : 'text-pos-green'}`}>{dev > 0 ? '+' : ''}{dev} {l.unit}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="text-right">{l.qty} {l.unit}</td>
+                              <td className="text-right text-gray-500">{formatTenge(cost)}</td>
+                            </>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  {!isInvDoc && (
+                    <tfoot><tr className="border-t font-semibold"><td className="py-1">Итого себестоимость</td><td /><td className="text-right">{formatTenge(total)}</td></tr></tfoot>
+                  )}
+                </table>
+              </div>
+              <div className="px-5 py-3 border-t flex gap-3 justify-end">
+                <button onClick={() => setViewDoc(null)} className="h-11 px-5 rounded-md border border-gray-300 hover:bg-gray-100">Закрыть</button>
+                <button onClick={() => printToast(`${d.type} №${d.id} распечатан · позиций: ${d.lines.length}`)}
+                  className="h-11 px-6 rounded-md bg-pos-blue text-white">Печать</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
