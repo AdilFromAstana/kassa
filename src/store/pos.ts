@@ -295,7 +295,7 @@ interface PosState {
 
   // деньги, возвраты, перенос, банкеты
   addCashMovement: (kind: 'in' | 'out', type: string, amount: number, comment: string) => void
-  refundOrder: (receiptNo: string, lineUids: string[] | 'all', opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card' }) => Refund | null
+  refundOrder: (receiptNo: string, sel: 'all' | string[] | { uid: string; qty: number }[], opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card' }) => Refund | null
   cashInDrawer: () => number // наличные в денежном ящике (для проверки возврата наличными)
   changePaymentType: (receiptNo: string, payments: PaymentSplit[]) => void
   moveOrderToTable: (orderId: number, tableId: string, hallId: string) => void
@@ -624,7 +624,7 @@ export const usePos = create<PosState>((set, get) => ({
       movementSeq: st.movementSeq + 1,
     })),
 
-  refundOrder: (receiptNo, lineUids, opts) => {
+  refundOrder: (receiptNo, sel, opts) => {
     let closed = get().closedOrders.find((o) => o.fiscalDocNo === receiptNo)
     if (!closed) { // искать в архиве закрытых кассовых смен
       for (const sh of get().closedShifts) {
@@ -633,17 +633,29 @@ export const usePos = create<PosState>((set, get) => ({
       }
     }
     if (!closed) return null
-    const full = lineUids === 'all'
-    const uids = full ? closed.lines.map((l) => l.uid) : lineUids
-    const returnedLines = closed.lines.filter((l) => uids.includes(l.uid))
+    const co = closed
+    const full = sel === 'all'
+    // нормализуем выбор к карте «uid → возвращаемое количество» (поддержка дробного возврата)
+    const qtyByUid: Record<string, number> = {}
+    if (full) {
+      for (const l of co.lines) qtyByUid[l.uid] = l.qty
+    } else if (Array.isArray(sel) && sel.length > 0 && typeof sel[0] === 'object') {
+      for (const s of sel as { uid: string; qty: number }[]) if (s.qty > 0) qtyByUid[s.uid] = s.qty
+    } else {
+      for (const uid of sel as string[]) { const l = co.lines.find((x) => x.uid === uid); if (l) qtyByUid[uid] = l.qty }
+    }
+    const uids = Object.keys(qtyByUid)
+    if (uids.length === 0) return null
+    // строки возврата, масштабированные на возвращаемое количество (для суммы и возврата на склад)
+    const returnedLines = uids.map((uid) => { const l = co.lines.find((x) => x.uid === uid)!; return { ...l, qty: qtyByUid[uid] } })
     const amount = full
-      ? closed.total
-      : returnedLines.reduce((s, l) => s + lineTotal(l), 0)
+      ? co.total
+      : +returnedLines.reduce((s, l) => s + lineTotal(l), 0).toFixed(2)
     const refund: Refund = {
       id: get().refundSeq + 1,
-      orderId: closed.id,
+      orderId: co.id,
       fiscalDocNo: String(get().fiscalSeq + 1),
-      amount, full, lineUids: uids,
+      amount, full, lineUids: uids, qtyByUid,
       reason: opts.reason, restock: opts.restock, method: opts.method,
       at: fullNow(), by: opts.by,
     }

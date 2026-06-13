@@ -366,6 +366,7 @@ export interface Refund {
   amount: number
   full: boolean
   lineUids: string[] // какие позиции вернули (для частичного)
+  qtyByUid?: Record<string, number> // дробный возврат: сколько единиц каждой позиции возвращено
   reason: string     // причина возврата
   restock: boolean   // вернуть товар на склад (возврат со списанием на склад)
   method: 'cash' | 'card' // способ возврата денег (наличные требуют наличия в ящике)
