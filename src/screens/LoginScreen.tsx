@@ -47,6 +47,9 @@ export default function LoginScreen() {
           <div className="text-xs text-gray-400 text-center max-w-xs">
             PIN-коды (мок): Петров <b>1111</b>, Иванова <b>2222</b>, Легасов <b>3333</b>, Админ <b>0000</b>
           </div>
+          <button onClick={() => navigate('/office')} className="text-xs text-gray-500 hover:text-pos-accent underline underline-offset-2">
+            Бэк-офис (iikoOffice, мок) →
+          </button>
         </div>
       ) : (
         <div className="bg-white text-gray-800 rounded-lg p-8 w-[420px] flex flex-col gap-4">
