@@ -30,14 +30,27 @@ export default function FiscalCommandsScreen() {
   const cashPaid = closedOrders.reduce((s, o) => s + o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((x, p) => x + p.amount, 0), 0)
   const cashInDrawer = +((cashShift?.openingCash ?? 0) + cashIn + cashPaid - cashOut - refundsSum).toFixed(2)
 
+  const [showJournal, setShowJournal] = useState(false)
+  const unsentOfd = 0 // непереданных в ОФД (мок: онлайн-режим). Реальное значение — с драйвера Webkassa.
+
   const cmd = (label: string, result: string) => ({ label, result })
   const commands = [
     cmd('Состояние ФР', `${reg.model} · ФН ${reg.fn} · смена ${reg.shiftOpen ? 'открыта' : 'закрыта'}`),
+    cmd('Снять показания ФН', `Показания ФН ${reg.fn}: чеков за смену ${count}, выручка ${formatTenge(revenue)} (без гашения)`),
+    cmd('Синхронизация с ОФД', `Синхронизация с ОФД РК выполнена · непереданных чеков: ${unsentOfd}`),
+    cmd('Ресурс ФН', `Фискальный накопитель ${reg.fn}: ресурс в норме, замена не требуется`),
+    cmd('Служебный чек', 'Служебный (нефискальный) чек напечатан'),
     cmd('Копия последнего чека', 'Копия последнего фискального чека'),
     cmd('Открыть денежный ящик', 'Денежный ящик открыт'),
-    cmd('Запрос связи с ОФД', 'Связь с ОФД РК: ОК, непереданных чеков: 0'),
     cmd('Тех. обнуление', 'Технологическое обнуление выполнено'),
   ]
+
+  // журнал операций ФР — фискальные события смены (продажи/возвраты/касса), как в iikoFront
+  const journal = [
+    ...closedOrders.map((o) => ({ t: (o.paidAt.split(',')[1] ?? '').trim().slice(0, 5), e: `Продажа · чек №${o.id} · ФД ${o.fiscalDocNo}`, v: formatTenge(o.total) })),
+    ...refunds.map((r) => ({ t: (r.at.split(',')[1] ?? '').trim().slice(0, 5), e: `Возврат · ФД ${r.fiscalDocNo}`, v: '− ' + formatTenge(r.amount) })),
+    ...cashMovements.map((m) => ({ t: (m.at.split(',')[1] ?? '').trim().slice(0, 5), e: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}`, v: (m.kind === 'in' ? '+ ' : '− ') + formatTenge(m.amount) })),
+  ].sort((a, b) => a.t.localeCompare(b.t))
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
@@ -47,6 +60,13 @@ export default function FiscalCommandsScreen() {
           <button key={f.id} onClick={() => setFr(f.id)}
             className={`px-4 h-10 rounded-md ${fr === f.id ? 'bg-pos-blue' : 'bg-white/10'}`}>{f.name}</button>
         ))}
+      </div>
+      {/* строка состояния ФР: смена / непереданные в ОФД / ресурс */}
+      <div className="px-6 pt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+        <span className="text-white/50">ФН: <span className="text-white/80">{reg.fn}</span></span>
+        <span className="text-white/50">Смена: <span className={reg.shiftOpen ? 'text-pos-green' : 'text-white/60'}>{reg.shiftOpen ? 'открыта' : 'закрыта'}</span></span>
+        <span className="text-white/50">Непереданных в ОФД: <span className={unsentOfd > 0 ? 'text-pos-rose' : 'text-pos-green'}>{unsentOfd}</span></span>
+        <span className="text-white/50">Чеков за смену: <span className="text-white/80">{count}</span></span>
       </div>
       <div className="flex-1 overflow-auto p-6">
         {/* X / Z — отдельные кнопки сменных отчётов */}
@@ -69,12 +89,38 @@ export default function FiscalCommandsScreen() {
             <button key={c.label} onClick={() => printToast(c.result)}
               className="h-20 rounded-md bg-white text-gray-800 active:bg-gray-100">{c.label}</button>
           ))}
+          <button onClick={() => setShowJournal(true)}
+            className="h-20 rounded-md bg-white text-gray-800 active:bg-gray-100 col-span-2">Журнал операций ФР</button>
         </div>
         <div className="text-white/40 text-xs mt-4">KZ Команды идут через драйвер Webkassa. Реальные операции подключаются на бэкенде/.NET.</div>
       </div>
       <div className="h-16 bg-white text-gray-700 flex items-center px-4">
         <BackButton onClick={() => navigate('/menu')} />
       </div>
+
+      {showJournal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowJournal(false)}>
+          <div className="bg-white text-gray-800 rounded-lg w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b flex items-center">
+              <div className="font-semibold">Журнал операций ФР · {reg.name}</div>
+              <button onClick={() => setShowJournal(false)} className="ml-auto text-gray-400 hover:text-gray-700 text-xl leading-none">✕</button>
+            </div>
+            <div className="flex-1 overflow-auto px-5 py-3 text-sm font-mono">
+              {journal.length === 0 ? <div className="text-gray-400">— операций за смену нет —</div>
+                : journal.map((x, i) => (
+                  <div key={i} className="flex justify-between gap-3 py-0.5 border-b border-gray-100">
+                    <span><span className="text-gray-400">{x.t || '—'}</span> {x.e}</span>
+                    <span className="whitespace-nowrap">{x.v}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="px-5 py-3 border-t flex justify-end">
+              <button onClick={() => { printToast('Журнал операций ФР распечатан'); setShowJournal(false) }}
+                className="h-11 px-6 rounded-md bg-pos-blue text-white">Печать</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {report && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setReport(null)}>
