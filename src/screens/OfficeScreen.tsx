@@ -4,6 +4,7 @@ import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
+import { attendance } from '../mock/data'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -94,6 +95,9 @@ export default function OfficeScreen() {
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
+  // тип оплаты сотрудника: оклад / повременная (по часам из явок кассы); ставка ₸/час
+  const [payMode, setPayMode] = useState<Record<string, 'salary' | 'hourly'>>({})
+  const [hourRate, setHourRate] = useState<Record<string, number>>({})
   const allowed = ROLE_SECTIONS[role]
   const visibleNav = NAV.filter((n) => allowed.includes(n.id))
   useEffect(() => { if (!allowed.includes(section)) setSection(allowed[0]) }, [role]) // роль сменилась → перейти на доступный раздел
@@ -238,9 +242,30 @@ export default function OfficeScreen() {
     return Math.round(bonus)
   }
 
-  // ───────── зарплата: начислено (оклад − налоги + премия − удержания) + выплаты (аванс/расчёт) ─────────
-  const payrollOf = (staffId: string, staffName: string) => {
-    const okl = salary[staffId] ?? 250000
+  // отработанные часы из ЯВОК кассы (тот же справочник, что и AttendanceScreen): in→out, открытая смена → до now
+  const toMin = (t?: string) => { const m = /^(\d{1,2}):(\d{2})/.exec((t ?? '').trim()); return m ? +m[1] * 60 + +m[2] : null }
+  const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() })()
+  const hoursOf = (staffName: string) => {
+    let mins = 0
+    for (const a of attendance) {
+      if (a.staff !== staffName || a.type !== 'Отработано') continue
+      const i = toMin(a.in); if (i == null) continue
+      mins += Math.max(0, (toMin(a.out) ?? nowMin) - i)
+    }
+    return +(mins / 60).toFixed(1)
+  }
+  const defaultMode = (positions: string[]): 'salary' | 'hourly' =>
+    positions.some((p) => ['Официант', 'Бармен', 'Повар'].includes(p)) ? 'hourly' : 'salary'
+  const modeOf = (staffId: string, positions: string[]) => payMode[staffId] ?? defaultMode(positions)
+  const rateOf = (staffId: string) => hourRate[staffId] ?? 1500
+
+  // ───────── зарплата: начислено (база − налоги + премия − удержания) + выплаты (аванс/расчёт) ─────────
+  // База = оклад ИЛИ повременная (часы из явок кассы × ставка). Премия — за продажи в закрытых заказах кассы.
+  const payrollOf = (staffId: string, staffName: string, positions: string[]) => {
+    const mode = modeOf(staffId, positions)
+    const hours = hoursOf(staffName)
+    const rate = rateOf(staffId)
+    const okl = mode === 'hourly' ? Math.round(hours * rate) : (salary[staffId] ?? 250000)
     const t = kzTax(okl) // 🇰🇿 налоги РК 2026
     const premium = motivationOf(staffName)
     const deduction = salaryDeductions.filter((d) => d.staffId === staffId).reduce((s, d) => s + d.amount, 0)
@@ -248,10 +273,10 @@ export default function OfficeScreen() {
     const advance = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'advance').reduce((s, p) => s + p.amount, 0)
     const settle = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'settlement').reduce((s, p) => s + p.amount, 0)
     const remaining = +(net - advance - settle).toFixed(2)
-    return { okl, ...t, premium, deduction, net, advance, settle, remaining }
+    return { okl, mode, hours, rate, ...t, premium, deduction, net, advance, settle, remaining }
   }
   // сводка по зарплате (для шапки раздела)
-  const payrollRows = staffList.map((p) => ({ p, ...payrollOf(p.id, p.name) }))
+  const payrollRows = staffList.map((p) => ({ p, ...payrollOf(p.id, p.name, p.positions) }))
   const totNet = payrollRows.reduce((s, r) => s + r.net, 0)
   const totPremium = payrollRows.reduce((s, r) => s + r.premium, 0)
   const totAdvance = payrollRows.reduce((s, r) => s + r.advance, 0)
@@ -1160,8 +1185,9 @@ export default function OfficeScreen() {
         ) : section === 'payroll' ? (
           <div className="p-6 max-w-5xl">
             <div className="text-xs text-gray-500 mb-4">
-              Платёжная ведомость (iikoOffice). 🇰🇿 Налоги РК 2026: удержания с работника — ОПВ 10%, ВОСМС 2%, ИПН 10% (вычет ОПВ+ВОСМС+30 МРП); за счёт работодателя — ОПВР 3,5%, ООСМС 3%, СО 5%, соцналог 6%.
-              «К выплате» = оклад − удержания + премия − штрафы; выдача аванса/расчёта = <b>изъятие наличных из кассы</b> (отчёт 038).
+              Платёжная ведомость (iikoOffice), <b>связана с кассой</b>: повременная база = <b>часы из явок</b> × ставка, премия = <b>личные продажи</b> в закрытых заказах (мотивация), выдача = <b>изъятие наличных из кассы</b> (отчёт 038).
+              🇰🇿 Налоги РК 2026: удержания — ОПВ 10%, ВОСМС 2%, ИПН 10% (вычет ОПВ+ВОСМС+30 МРП); работодатель — ОПВР 3,5%, ООСМС 3%, СО 5%, соцналог 6%.
+              «К выплате» = база − налоги + премия − штрафы.
             </div>
 
             {/* сводка: начислено / премия / выдано авансов / расчёта / осталось */}
@@ -1176,16 +1202,26 @@ export default function OfficeScreen() {
             <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-6">
               <table className="w-full text-sm">
                 <thead><tr className="text-gray-500 text-left border-b border-gray-200">
-                  <th className="p-2">Сотрудник</th><th className="text-right">Оклад ₸</th><th className="text-right">Налоги</th><th className="text-right">Премия</th><th className="text-right">Удержано</th><th className="text-right">К выплате</th>
+                  <th className="p-2">Сотрудник</th><th>Тип оплаты</th><th className="text-right">Часы (явки)</th><th className="text-right">Оклад / ставка</th><th className="text-right">База ₸</th><th className="text-right">Налоги</th><th className="text-right">Премия</th><th className="text-right">Удержано</th><th className="text-right">К выплате</th>
                   <th className="text-right">Аванс</th><th className="text-right">Расчёт</th><th className="text-right">Остаток</th><th className="p-2 text-center">Действия</th>
                 </tr></thead>
                 <tbody>
-                  {payrollRows.map(({ p, okl, opv, vosms, ipn, opvr, oosms, so, sn, premium, deduction, net, advance, settle, remaining }) => {
+                  {payrollRows.map(({ p, okl, mode, hours, rate, opv, vosms, ipn, opvr, oosms, so, sn, premium, deduction, net, advance, settle, remaining }) => {
                     const advanceAmt = Math.min(remaining, Math.round(net * 0.4)) // аванс ≈ 40% от начисленного
                     return (
                       <tr key={p.id} className="border-b border-gray-100 last:border-0">
                         <td className="p-2">{p.name}<div className="text-xs text-gray-400">{p.positions[0]}</div></td>
-                        <td className="text-right"><input type="number" value={okl} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" /></td>
+                        <td>
+                          <button onClick={() => setPayMode((m) => ({ ...m, [p.id]: mode === 'hourly' ? 'salary' : 'hourly' }))}
+                            className={`h-7 px-2 rounded text-xs ${mode === 'hourly' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'}`}>{mode === 'hourly' ? 'повременная' : 'оклад'}</button>
+                        </td>
+                        <td className="text-right text-gray-500">{mode === 'hourly' ? `${hours} ч` : '—'}</td>
+                        <td className="text-right">
+                          {mode === 'hourly'
+                            ? <span className="inline-flex items-center gap-1"><input type="number" value={rate} min={0} onChange={(e) => setHourRate((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-20 h-8 rounded border border-gray-300 px-2 text-right" /><span className="text-gray-400 text-xs">/ч</span></span>
+                            : <input type="number" value={salary[p.id] ?? 250000} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" />}
+                        </td>
+                        <td className="text-right text-gray-600">{formatTenge(okl)}</td>
                         <td className="text-right text-gray-500" title={`Удержано: ОПВ ${opv} · ВОСМС ${vosms} · ИПН ${ipn}\nРаботодатель: ОПВР ${opvr} · ООСМС ${oosms} · СО ${so} · СН ${sn}`}>{formatTenge(opv + vosms + ipn)}</td>
                         <td className="text-right text-emerald-600">{premium > 0 ? '+' + formatTenge(premium) : <span className="text-gray-300">—</span>}</td>
                         <td className="text-right text-red-500">{deduction > 0 ? '−' + formatTenge(deduction) : <span className="text-gray-300">—</span>}</td>

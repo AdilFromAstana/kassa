@@ -3,13 +3,22 @@ import BackButton from '../components/BackButton'
 import { Megaphone, Calendar, Trophy } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { findDish } from '../mock/menu'
+import { attendance } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import TopBar from '../components/TopBar'
+
+const HOUR_RATE = 1500 // ставка повременной оплаты, ₸/час (демо)
 
 // Личная страница (iikoFront): результат работы по датам + итоги месяца (ЛП/СПЧ) + мотивация + управление личной сменой.
 export default function PersonalPageScreen() {
   const navigate = useNavigate()
-  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms } = usePos()
+  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms, salaryDeductions } = usePos()
+
+  // отработанные часы из явок (тот же справочник, что и в офисной зарплате) → повременная оплата
+  const hhmm2min = (t?: string) => { const m = /^(\d{1,2}):(\d{2})/.exec((t ?? '').trim()); return m ? +m[1] * 60 + +m[2] : null }
+  const nowMinutes = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes() })()
+  const myHours = +(attendance.filter((a) => a.staff === user?.name && a.type === 'Отработано')
+    .reduce((s, a) => { const i = hhmm2min(a.in); return i == null ? s : s + Math.max(0, (hhmm2min(a.out) ?? nowMinutes) - i) }, 0) / 60).toFixed(1)
 
   const myClosed = closedOrders.filter((o) => o.waiter === user?.name)
   const personalSales = myClosed.reduce((s, o) => s + o.total, 0) // ЛП — личные продажи
@@ -117,13 +126,20 @@ export default function PersonalPageScreen() {
             )}
           </div>
 
-          <div className="bg-white/5 rounded-lg p-4 max-w-md">
-            <div className="text-pos-accent text-sm uppercase mb-2">Начисления (мок)</div>
-            <Row k="Бонусы" v="12 000 ₸" />
-            <Row k="Повременная оплата" v="48 000 ₸" />
-            <Row k="Штрафы" v="0 ₸" />
-            <Row k="Итого" v="60 000 ₸" bold />
-          </div>
+          {(() => {
+            const hourly = Math.round(myHours * HOUR_RATE)
+            const fines = salaryDeductions.filter((d) => d.staffId === user?.id).reduce((s, d) => s + d.amount, 0)
+            const total = +(hourly + motivationTotal - fines).toFixed(0)
+            return (
+              <div className="bg-white/5 rounded-lg p-4 max-w-md">
+                <div className="text-pos-accent text-sm uppercase mb-2">Начисления (из явок и продаж)</div>
+                <Row k={`Повременная (${myHours} ч × ${formatTenge(HOUR_RATE)})`} v={formatTenge(hourly)} />
+                <Row k="Премия за продажи" v={formatTenge(motivationTotal)} />
+                <Row k="Штрафы" v={fines > 0 ? '− ' + formatTenge(fines) : formatTenge(0)} />
+                <Row k="Итого начислено" v={formatTenge(total)} bold />
+              </div>
+            )
+          })()}
         </div>
       </div>
       <div className="h-16 bg-white flex items-center px-4 gap-4">
