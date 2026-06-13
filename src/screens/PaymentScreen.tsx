@@ -31,6 +31,7 @@ export default function PaymentScreen() {
   const [courier, setCourier] = useState('')
   const [changeFrom, setChangeFrom] = useState('')
   const [prepaid, setPrepaid] = useState(false)
+  const [showGoods, setShowGoods] = useState(false) // товарный (нефискальный) чек
 
   const paymentTypes = pos.paymentTypes
   const tabs = paymentTypes.filter((p) => p.active)
@@ -297,7 +298,7 @@ export default function PaymentScreen() {
       <div className="h-16 bg-[#111] text-white flex items-center px-5 gap-8 shrink-0">
         <BarBtn onClick={() => navigate('/order')} Icon={ChevronLeft} label="НАЗАД" />
         <BarBtn onClick={() => navigate('/order')} Icon={UtensilsCrossed} label="ЗАКАЗ" />
-        <BarBtn onClick={() => printToast('Товарный чек')} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
+        <BarBtn onClick={() => setShowGoods(true)} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
         <BarBtn onClick={() => printToast('Чек отправлен')} Icon={Send} label="ОТПРАВКА ЧЕКА" />
         {!fiscalSep ? (
           <button onClick={doPay} disabled={paid < total || total <= 0}
@@ -315,6 +316,35 @@ export default function PaymentScreen() {
           </button>
         )}
       </div>
+
+      {/* товарный (нефискальный) чек — реальный состав + реквизиты */}
+      {showGoods && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowGoods(false)}>
+          <div className="bg-white text-gray-800 rounded-lg w-[360px] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 overflow-auto font-mono text-sm">
+              <div className="text-center font-bold">ТОВАРНЫЙ ЧЕК (нефискальный)</div>
+              <div className="text-center text-xs text-gray-500 mb-3">{pos.establishment.name} · БИН 123456789012<br />{tableLabel} · {order!.openedAt}</div>
+              {payLines.map((l, i) => (
+                <div key={l.uid} className="flex justify-between gap-2 py-0.5">
+                  <span>{i + 1}. {l.name}{l.qty !== 1 ? ` ×${String(l.qty).replace('.', ',')}` : ''}</span>
+                  <span className="whitespace-nowrap">{formatTenge(lineTotal(l))}</span>
+                </div>
+              ))}
+              {(order!.discountPct > 0 || order!.surchargePct > 0) && (
+                <div className="text-xs text-gray-500 mt-1">{order!.discountPct > 0 && `скидка ${order!.discountPct}% `}{order!.surchargePct > 0 && `надбавка ${order!.surchargePct}%`}</div>
+              )}
+              <div className="border-t border-dashed my-2" />
+              <div className="flex justify-between font-bold"><span>ИТОГО</span><span>{formatTenge(total)}</span></div>
+              <div className="text-center text-xs text-gray-400 mt-3">Не является фискальным документом. ҚҚС 16% включён.</div>
+            </div>
+            <div className="px-5 py-3 border-t flex gap-3 justify-end font-sans">
+              <button onClick={() => setShowGoods(false)} className="h-11 px-5 rounded-md border border-gray-300 hover:bg-gray-100">Закрыть</button>
+              <button onClick={() => { printToast(`Товарный чек · ${payLines.length} поз. · ${formatTenge(total)}`); setShowGoods(false) }}
+                className="h-11 px-6 rounded-md bg-pos-blue text-white">Печать</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
