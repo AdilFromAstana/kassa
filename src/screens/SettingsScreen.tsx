@@ -71,6 +71,34 @@ export default function SettingsScreen() {
           <div className="h-12 px-4 rounded-md bg-white/5 flex items-center">{est.frCount} ФР</div>
         </div>
 
+        {/* Лицензии (Администрирование → Лицензии): модули + срок действия. На кассе — только просмотр. */}
+        <div className="mb-8">
+          <div className="text-pos-accent text-sm uppercase mb-2">Лицензии (модули)</div>
+          <div className="text-white/40 text-xs mb-2">Редакция: iikoRMS · терминалов: 1 · поставка из офиса. KZ: фискализация — Webkassa (ОФД РК).</div>
+          <div className="rounded-md bg-white/5 overflow-hidden">
+            <div className="flex items-center px-4 py-2 text-xs text-white/40 border-b border-white/10">
+              <span className="flex-1">Модуль</span><span className="w-28 text-center">Статус</span><span className="w-28 text-right">Действует до</span>
+            </div>
+            {([
+              ['iikoFront (касса)', true],
+              ['Webkassa / ОФД РК', true],
+              ['Резервы и банкеты', est.banquets],
+              ['Кухонный экран (KDS)', est.kitchenScreen],
+              ['Доставка (iikoDelivery)', est.delivery],
+              ['iikoCard (лояльность)', est.iikoCard],
+            ] as const).map(([name, on]) => (
+              <div key={name} className="flex items-center px-4 py-2.5 border-b border-white/5 text-sm">
+                <span className="flex-1">{name}</span>
+                <span className="w-28 text-center">
+                  {on ? <span className="text-pos-green text-xs inline-flex items-center gap-1"><Check size={13} />активна</span>
+                      : <span className="text-white/30 text-xs inline-flex items-center gap-1"><X size={13} />не подключён</span>}
+                </span>
+                <span className="w-28 text-right text-white/50">{on ? '31.12.2026' : '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* демо-данные — служебная дев-панель (не реальная айка) */}
         <div className="border-t border-white/10 pt-5">
           <div className="text-pos-accent text-sm uppercase mb-2">Демо / разработка (не из айки)</div>
