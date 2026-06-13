@@ -12,7 +12,7 @@ const GRID = 'grid grid-cols-[90px_120px_140px_150px_70px_minmax(150px,1fr)_120p
 
 export default function BanquetsScreen() {
   const navigate = useNavigate()
-  const { banquets, setBanquetStatus, logout } = usePos()
+  const { banquets, setBanquetStatus, logout, orders, startOrder, openExistingOrder } = usePos()
   const [showBanket, setShowBanket] = useState(true)
   const [showReserv, setShowReserv] = useState(true)
   const [onlyActive, setOnlyActive] = useState(true)
@@ -25,6 +25,15 @@ export default function BanquetsScreen() {
 
   const hallName = (id: string) => halls.find((h) => h.id === id)?.name ?? id
   const tableNo = (id: string) => findTable(id)?.no ?? id
+
+  // «ЗАКАЗ» — связь банкета/резерва со счётом: открыть существующий заказ на столе или создать новый
+  const openOrder = (r: typeof banquets[number]) => {
+    const existing = orders.find((o) => o.tableId === r.tableId)
+    if (existing) openExistingOrder(existing.id)
+    else startOrder({ tableId: r.tableId, hallId: r.hallId, guests: Math.max(1, r.guests), type: 'dinein' })
+    if (r.status === 'Действует') setBanquetStatus(r.id, 'Гость пришёл')
+    navigate('/order')
+  }
 
   const rows = banquets
     .filter((r) => (r.type === 'Банкет' ? showBanket : showReserv))
@@ -90,6 +99,9 @@ export default function BanquetsScreen() {
             <div>{r.prepayment > 0 ? formatTenge(r.prepayment) : '—'}</div>
             <div>{r.comment}</div>
             <div className="flex gap-1 justify-end">
+              {r.status !== 'Снят' && (
+                <button onClick={(e) => { e.stopPropagation(); openOrder(r) }} className="text-xs bg-pos-blue text-white px-2 py-1 rounded" title="Открыть счёт на столе банкета">ЗАКАЗ</button>
+              )}
               {r.status === 'Действует' && (
                 <>
                   <button onClick={(e) => { e.stopPropagation(); setBanquetStatus(r.id, 'Гость пришёл') }} className="text-xs bg-pos-green px-2 py-1 rounded">Пришёл</button>
