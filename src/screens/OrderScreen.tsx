@@ -239,14 +239,16 @@ export default function OrderScreen() {
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setShowMore(false)}>
           <div className="bg-white text-gray-800 rounded-lg p-2 w-[320px]" onClick={(e) => e.stopPropagation()}>
             {[
-              { label: 'Скидка', on: () => setDiscount() },
-              { label: 'Надбавка', on: () => setSurcharge() },
-              ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true) }] : []),
-              ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true) }] : []),
-              ...(est.comments ? [{ label: 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:'); if (c) printToast('Комментарий сохранён') } }] : []),
+              { label: 'Скидка', on: () => setDiscount(), disabled: !pos.can('F_ID') },
+              { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
+              ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
+              ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
+              ...(est.comments ? [{ label: 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:'); if (c) printToast('Комментарий сохранён') }, disabled: false }] : []),
             ].map((it) => (
-              <button key={it.label} onClick={() => { setShowMore(false); it.on() }}
-                className="w-full text-left px-4 h-12 rounded-md hover:bg-gray-100 active:bg-gray-200">{it.label}</button>
+              <button key={it.label} disabled={it.disabled} onClick={() => { setShowMore(false); it.on() }}
+                className="w-full text-left px-4 h-12 rounded-md hover:bg-gray-100 active:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between">
+                <span>{it.label}</span>{it.disabled && <span className="text-xs text-gray-400">нет права</span>}
+              </button>
             ))}
             <button onClick={() => setShowMore(false)} className="w-full text-center px-4 h-11 mt-1 rounded-md bg-gray-200">Закрыть</button>
           </div>

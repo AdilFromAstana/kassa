@@ -76,7 +76,7 @@ export default function MainMenuScreen() {
 
           <div className="border border-gray-300">
             <Header title="ПЕРСОНАЛ" color="#8a6fae" />
-            <Tile c={{ label: 'Редактировать явки', onClick: () => navigate('/attendance') }} />
+            <Tile c={{ label: 'Редактировать явки', onClick: () => navigate('/attendance'), disabled: !pos.can('F_CVS') }} />
           </div>
         </div>
 
@@ -84,7 +84,7 @@ export default function MainMenuScreen() {
         <div className="w-56 border border-gray-300">
           <Header title="СЕРВИС" color="#4a9b86" />
           <div className="grid grid-cols-1">
-            <Tile c={{ label: 'Отчеты', onClick: () => navigate('/reports') }} />
+            <Tile c={{ label: 'Отчеты', onClick: () => navigate('/reports'), disabled: !pos.can('F_VRPT') }} />
             <Tile c={{ label: 'Стоп-лист', onClick: () => navigate('/stoplist') }} />
             <Tile c={{ label: 'Документы', onClick: () => navigate('/documents') }} />
           </div>
@@ -105,20 +105,20 @@ export default function MainMenuScreen() {
           <div className="grid grid-cols-2">
             {(cashShift
               ? [ // смена ОТКРЫТА — «Открыть» скрыта (как в айке)
-                  { label: 'Закрыть кассовую смену', onClick: () => navigate('/shift/close') },
-                  { label: 'Внести деньги', onClick: () => setCashModal('in') },
-                  { label: 'Изъять деньги', onClick: () => setCashModal('out') },
+                  { label: 'Закрыть кассовую смену', onClick: () => navigate('/shift/close'), disabled: !pos.can('F_CS') },
+                  { label: 'Внести деньги', onClick: () => setCashModal('in'), disabled: !pos.can('F_CASH') },
+                  { label: 'Изъять деньги', onClick: () => setCashModal('out'), disabled: !pos.can('F_CASH') },
                   { label: 'Закрытые заказы', onClick: () => navigate('/orders/closed') },
                   { label: 'Заказы закрытых кассовых смен', onClick: () => navigate('/shifts/closed') },
                   { label: 'Открытые заказы', onClick: () => navigate('/orders/open') },
-                  { label: 'Печать X-отчета', onClick: () => printToast('X-отчёт (без гашения)') },
+                  { label: 'Печать X-отчета', onClick: () => printToast('X-отчёт (без гашения)'), disabled: !pos.can('F_XR') },
                   { label: 'Команды фискальному регистратору', onClick: () => navigate('/fiscal/commands') },
                   { label: 'Сменить кассира', onClick: switchCashier },
-                  { label: 'Чек коррекции', onClick: () => navigate('/correction') },
-                  { label: 'Возврат товаров', onClick: () => navigate('/orders/closed') },
+                  { label: 'Чек коррекции', onClick: () => navigate('/correction'), disabled: !pos.can('F_OCS') },
+                  { label: 'Возврат товаров', onClick: () => navigate('/orders/closed'), disabled: !pos.can('F_STRN') },
                 ]
               : [ // смена ЗАКРЫТА — доступно только открытие + неоперационные
-                  { label: 'Открыть кассовую смену', onClick: openCashShift, accent: true },
+                  { label: 'Открыть кассовую смену', onClick: openCashShift, accent: true, disabled: !pos.can('F_OCS') },
                   { label: 'Заказы закрытых кассовых смен', onClick: () => navigate('/shifts/closed') },
                   { label: 'Сменить кассира', onClick: switchCashier },
                 ]
