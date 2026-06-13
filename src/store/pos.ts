@@ -281,6 +281,7 @@ interface PosState {
   setLineQty: (uid: string, qty: number) => void
   removeLine: (uid: string) => void
   setGuestNo: (uid: string, guestNo: number | undefined) => void
+  setLineComment: (uid: string, comment: string) => void
   setDiscount: (pct: number) => void
   setSurcharge: (pct: number) => void
   precheck: () => void
@@ -529,6 +530,10 @@ export const usePos = create<PosState>((set, get) => ({
   setGuestNo: (uid, guestNo) => set((st) => ({
     orders: st.orders.map((o) => o.id === st.currentOrderId
       ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, guestNo } : l)) } : o),
+  })),
+  setLineComment: (uid, comment) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, comment: comment || undefined } : l)) } : o),
   })),
   setDiscount: (pct) => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, discountPct: pct } : o)),

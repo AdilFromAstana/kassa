@@ -80,6 +80,7 @@ export interface OrderLine {
   qty: number
   modifiers: SelectedModifier[]
   guestNo?: number // для деления между гостями
+  comment?: string // комментарий к позиции (печатается на марке кухни)
 }
 
 export type OrderType = 'dinein' | 'takeaway' | 'delivery'

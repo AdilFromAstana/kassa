@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, Search, Home, X, MoreVertical, Scissors, Plus, Receipt, ReceiptText, Users, Menu, Lock, UserRound, Calculator, Power, Printer } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, Home, X, MoreVertical, Scissors, Plus, Receipt, ReceiptText, Users, Menu, Lock, UserRound, Calculator, Power, Printer, MessageSquare } from 'lucide-react'
 import { usePos, lineTotal, orderSubtotal, orderTotal, isStopped } from '../store/pos'
 import { groupsByPage, dishesByGroup, findDish } from '../mock/menu'
 import { dishMaxPortions } from '../mock/warehouse'
@@ -30,6 +30,7 @@ export default function OrderScreen() {
   const [guestPay, setGuestPay] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [showDiscount, setShowDiscount] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
 
   useEffect(() => { if (!order) navigate('/halls') }, [order, navigate])
   // при переключении на другой заказ — сбросить активного гостя и выбор
@@ -42,6 +43,12 @@ export default function OrderScreen() {
     if (open.length < 2) return
     const idx = open.findIndex((o) => o.id === order.id)
     pos.openExistingOrder(open[(idx - 1 + open.length) % open.length].id)
+  }
+  const nextOrder = () => {
+    const open = pos.orders
+    if (open.length < 2) return
+    const idx = open.findIndex((o) => o.id === order.id)
+    pos.openExistingOrder(open[(idx + 1) % open.length].id)
   }
   const newOrder = () => pos.startOrder({ tableId: null, hallId: null, guests: 1, type: 'takeaway' })
 
@@ -140,6 +147,7 @@ export default function OrderScreen() {
                     {l.modifiers.map((m) => m.name + (m.qty > 1 ? `×${m.qty}` : '')).join(', ')}
                   </div>
                 )}
+                {l.comment && <div className="text-xs text-pos-blue italic pl-6 flex items-center gap-1"><MessageSquare size={11} />{l.comment}</div>}
               </div>
             ))}
           </div>
@@ -211,6 +219,9 @@ export default function OrderScreen() {
         <div className="mx-auto flex items-center gap-3">
           <button onClick={prevOrder} disabled={pos.orders.length < 2} title="Предыдущий заказ"
             className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center disabled:opacity-30 active:bg-white/20"><ChevronLeft size={22} /></button>
+          <span className="text-xs text-white/50 min-w-[3rem] text-center">{pos.orders.findIndex((o) => o.id === order.id) + 1} / {pos.orders.length}</span>
+          <button onClick={nextOrder} disabled={pos.orders.length < 2} title="Следующий заказ"
+            className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center disabled:opacity-30 active:bg-white/20"><ChevronRight size={22} /></button>
           <button onClick={newOrder} title="Новый заказ (быстрый чек)"
             className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20"><Plus size={22} /></button>
         </div>
@@ -239,8 +250,9 @@ export default function OrderScreen() {
               { label: 'Скидка', on: () => setDiscount(), disabled: !pos.can('F_ID') },
               { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
+              { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
-              ...(est.comments ? [{ label: 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:'); if (c) printToast('Комментарий сохранён') }, disabled: false }] : []),
+              ...(est.comments ? [{ label: selUid ? 'Комментарий к позиции' : 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:', (selUid && selLine?.comment) || ''); if (c != null) { if (selUid) pos.setLineComment(selUid, c); else if (c) printToast('Комментарий сохранён') } }, disabled: false }] : []),
             ].map((it) => (
               <button key={it.label} disabled={it.disabled} onClick={() => { setShowMore(false); it.on() }}
                 className="w-full text-left px-4 h-12 rounded-md hover:bg-gray-100 active:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between">
@@ -248,6 +260,26 @@ export default function OrderScreen() {
               </button>
             ))}
             <button onClick={() => setShowMore(false)} className="w-full text-center px-4 h-11 mt-1 rounded-md bg-gray-200">Закрыть</button>
+          </div>
+        </div>
+      )}
+
+      {/* объединить текущий заказ с другим открытым (mergeOrderInto) */}
+      {mergeOpen && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setMergeOpen(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-4 w-[380px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-1">Объединить заказ №{order.id}</div>
+            <div className="text-sm text-gray-500 mb-3">Позиции перенесутся в выбранный заказ, текущий закроется.</div>
+            <div className="space-y-2 max-h-72 overflow-auto">
+              {pos.orders.filter((o) => o.id !== order.id).map((o) => (
+                <button key={o.id} onClick={() => { pos.mergeOrderInto(order.id, o.id); setMergeOpen(false); printToast(`Заказ №${order.id} объединён с №${o.id}`); navigate('/order') }}
+                  className="w-full flex items-center justify-between px-3 h-12 rounded-md bg-gray-100 hover:bg-gray-200">
+                  <span>Заказ №{o.id} · {o.tableId ? `стол ${o.tableId.replace(/^t-/, '')}` : 'быстрый чек'}</span>
+                  <span className="font-medium">{formatTenge(orderTotal(o))}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setMergeOpen(false)} className="w-full text-center px-4 h-11 mt-3 rounded-md bg-gray-200">Отмена</button>
           </div>
         </div>
       )}
