@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor } from 'lucide-react'
-import { usePos } from '../store/pos'
+import { usePos, lineTotal } from '../store/pos'
 import { menuGroups, dishesByGroup, dishes } from '../mock/menu'
 import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
 import { staff } from '../mock/data'
@@ -25,20 +25,30 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'staff' | 'stock'
+type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports'
 const NAV: { id: Section | null; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
-  { id: null, label: 'Отчёты' },
+  { id: 'reports', label: 'Отчёты' },
 ]
 
 export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
-    ingredients, receiveStock, setIngredientStock } = usePos()
+    ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents } = usePos()
   const [section, setSection] = useState<Section>('settings')
+
+  // сводка для раздела «Отчёты»
+  const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
+  const avg = closedOrders.length ? revenue / closedOrders.length : 0
+  const refSum = refunds.reduce((s, r) => s + r.amount, 0)
+  const byType: Record<string, number> = {}
+  for (const o of closedOrders) for (const p of o.payments) byType[p.name] = (byType[p.name] ?? 0) + p.amount
+  const dishAgg: Record<string, { qty: number; sum: number }> = {}
+  for (const o of closedOrders) for (const l of o.lines) { (dishAgg[l.name] ??= { qty: 0, sum: 0 }); dishAgg[l.name].qty += l.qty; dishAgg[l.name].sum += lineTotal(l) }
+  const topDishes = Object.entries(dishAgg).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.sum - a.sum).slice(0, 5)
 
   const Toggle = ({ k, label, note }: { k: keyof Establishment; label: string; note: string }) => (
     <button onClick={() => setEstablishment({ [k]: !est[k] } as Partial<Establishment>)}
@@ -77,7 +87,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : 'Номенклатура и техкарты'}</div>
+          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : 'Отчёты'}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -195,7 +205,7 @@ export default function OfficeScreen() {
               </table>
             </div>
           </div>
-        ) : (
+        ) : section === 'stock' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               Номенклатура и остатки (приход/инвентаризация — офисный контур). Касса списывает по техкартам при продаже.
@@ -253,8 +263,45 @@ export default function OfficeScreen() {
               </table>
             </div>
           </div>
+        ) : (
+          <div className="p-6 max-w-3xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Сводка по текущей смене (из закрытых чеков кассы). В реальном iikoOffice — OLAP-отчёты; здесь базовая сводка.
+            </div>
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              <OfficeStat label="Выручка" value={formatTenge(revenue)} />
+              <OfficeStat label="Чеков" value={String(closedOrders.length)} />
+              <OfficeStat label="Средний чек" value={formatTenge(avg)} />
+              <OfficeStat label="Возвраты" value={formatTenge(refSum)} />
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">По типам оплаты</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-6">
+              {Object.entries(byType).length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет продаж.</div> :
+                Object.entries(byType).map(([n, v]) => (
+                  <div key={n} className="flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0"><span>{n}</span><span>{formatTenge(v)}</span></div>
+                ))}
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Топ блюд</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+              {topDishes.length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет продаж.</div> :
+                topDishes.map((t) => (
+                  <div key={t.name} className="flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0"><span>{t.name} ×{t.qty}</span><span>{formatTenge(t.sum)}</span></div>
+                ))}
+            </div>
+
+            <div className="text-gray-400 text-xs mt-4">Складских документов за сессию: {documents.length}</div>
+          </div>
         )}
       </div>
     </div>
   )
 }
+
+const OfficeStat = ({ label, value }: { label: string; value: string }) => (
+  <div className="bg-white border border-gray-200 rounded-md p-4">
+    <div className="text-xs text-gray-400">{label}</div>
+    <div className="text-xl font-bold text-gray-800">{value}</div>
+  </div>
+)
