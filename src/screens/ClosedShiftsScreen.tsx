@@ -2,7 +2,7 @@ import { useState } from 'react'
 import BackButton from '../components/BackButton'
 import { useNavigate } from 'react-router-dom'
 import { usePos, lineTotal } from '../store/pos'
-import { formatTenge } from '../lib/money'
+import { formatTenge, vatAmount } from '../lib/money'
 import TopBar from '../components/TopBar'
 import RefundModal from '../components/RefundModal'
 import { printToast } from '../lib/print'
@@ -14,8 +14,26 @@ export default function ClosedShiftsScreen() {
   const { closedShifts, refundOrder, refunds, cashShift } = usePos()
   const [selNo, setSelNo] = useState<number | null>(closedShifts[0]?.no ?? null)
   const [refundReq, setRefundReq] = useState<{ receiptNo: string; title: string; lines: { uid: string; name: string; qty: number; total: number }[] } | null>(null)
+  const [showZ, setShowZ] = useState(false)
   const shift = closedShifts.find((s) => s.no === selNo) ?? null
   const isRefunded = (orderId: number) => refunds.some((r) => r.orderId === orderId)
+
+  // агрегаты выбранной смены (для сводки и печати Z-отчёта из архива)
+  const agg = (() => {
+    if (!shift) return null
+    const byType: Record<string, number> = {}
+    let guests = 0, disc = 0, surch = 0
+    for (const o of shift.orders) {
+      for (const p of o.payments) byType[p.name] = (byType[p.name] ?? 0) + p.amount
+      guests += o.guests
+      const sub = o.lines.reduce((s, l) => s + lineTotal(l), 0)
+      disc += sub * (o.discountPct || 0) / 100
+      surch += sub * (o.surchargePct || 0) / 100
+    }
+    const shiftRefunds = refunds.filter((r) => shift.orders.some((o) => o.id === r.orderId))
+    const refundsSum = +shiftRefunds.reduce((s, r) => s + r.amount, 0).toFixed(2)
+    return { byType, guests, disc, surch, refundsSum, vat: vatAmount(shift.revenue, 16) }
+  })()
   const confirmRefund = (opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card'; uids?: string[] | 'all' }) => {
     if (!refundReq) return
     const r = refundOrder(refundReq.receiptNo, opts.uids ?? 'all', opts)
@@ -40,32 +58,24 @@ export default function ClosedShiftsScreen() {
         <div className="flex-1 p-6 overflow-auto">
           {!shift ? <div className="text-white/40">Выберите смену слева</div> : (
             <div className="max-w-2xl">
-              <div className="mb-3 text-sm text-white/60">Смена №{shift.no} · открыта {shift.openedAt} · закрыта {shift.closedAt}</div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="text-sm text-white/60">Смена №{shift.no} · открыта {shift.openedAt} · закрыта {shift.closedAt}</div>
+                <button onClick={() => setShowZ(true)} className="ml-auto h-9 px-4 rounded-md bg-rose-600 text-white text-sm">Печать Z-отчёта</button>
+              </div>
 
               {/* сводные итоги смены (по типам оплат / скидки / гости) */}
-              {(() => {
-                const byType: Record<string, number> = {}
-                let guests = 0, disc = 0, surch = 0
-                for (const o of shift.orders) {
-                  for (const p of o.payments) byType[p.name] = (byType[p.name] ?? 0) + p.amount
-                  guests += o.guests
-                  const sub = o.lines.reduce((s, l) => s + lineTotal(l), 0)
-                  disc += sub * (o.discountPct || 0) / 100
-                  surch += sub * (o.surchargePct || 0) / 100
-                }
-                return (
-                  <div className="bg-white/5 rounded-lg p-3 mb-4 text-sm grid grid-cols-2 gap-x-8 gap-y-1 max-w-lg">
-                    <div className="flex justify-between"><span className="text-white/50">Выручка:</span><b>{formatTenge(shift.revenue)}</b></div>
-                    <div className="flex justify-between"><span className="text-white/50">Чеков:</span><b>{shift.orders.length}</b></div>
-                    {Object.entries(byType).map(([n, v]) => (
-                      <div key={n} className="flex justify-between"><span className="text-white/50">{n}:</span><span>{formatTenge(v)}</span></div>
-                    ))}
-                    <div className="flex justify-between"><span className="text-white/50">Гостей:</span><span>{guests}</span></div>
-                    <div className="flex justify-between"><span className="text-white/50">Скидки:</span><span>{formatTenge(disc)}</span></div>
-                    <div className="flex justify-between"><span className="text-white/50">Надбавки:</span><span>{formatTenge(surch)}</span></div>
-                  </div>
-                )
-              })()}
+              {agg && (
+                <div className="bg-white/5 rounded-lg p-3 mb-4 text-sm grid grid-cols-2 gap-x-8 gap-y-1 max-w-lg">
+                  <div className="flex justify-between"><span className="text-white/50">Выручка:</span><b>{formatTenge(shift.revenue)}</b></div>
+                  <div className="flex justify-between"><span className="text-white/50">Чеков:</span><b>{shift.orders.length}</b></div>
+                  {Object.entries(agg.byType).map(([n, v]) => (
+                    <div key={n} className="flex justify-between"><span className="text-white/50">{n}:</span><span>{formatTenge(v)}</span></div>
+                  ))}
+                  <div className="flex justify-between"><span className="text-white/50">Гостей:</span><span>{agg.guests}</span></div>
+                  <div className="flex justify-between"><span className="text-white/50">Скидки:</span><span>{formatTenge(agg.disc)}</span></div>
+                  <div className="flex justify-between"><span className="text-white/50">Надбавки:</span><span>{formatTenge(agg.surch)}</span></div>
+                </div>
+              )}
 
               {!cashShift && <div className="text-pos-rose text-sm mb-3">Для возврата откройте кассовую смену — возврат проводится на ФР текущей открытой смены.</div>}
               {shift.orders.length === 0 ? <div className="text-white/40">В смене не было закрытых заказов</div> : (
@@ -104,6 +114,42 @@ export default function ClosedShiftsScreen() {
         <RefundModal title={refundReq.title} lines={refundReq.lines}
           onConfirm={confirmRefund} onCancel={() => setRefundReq(null)} />
       )}
+
+      {showZ && shift && agg && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowZ(false)}>
+          <div className="bg-white text-gray-800 rounded-lg w-full max-w-sm font-mono text-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 max-h-[80vh] overflow-auto">
+              <div className="text-center font-bold">Z-ОТЧЁТ (повторная печать)</div>
+              <div className="text-center text-xs text-gray-500 mb-3">
+                Терминал №998 · Кассовая смена №{shift.no}<br />
+                открыта {shift.openedAt}<br />закрыта {shift.closedAt}<br />KZ ҚҚС 16%
+              </div>
+              <ZRow k="Чеков закрыто" v={String(shift.orders.length)} />
+              <ZRow k="Гостей" v={String(agg.guests)} />
+              <ZRow k="Выручка" v={formatTenge(shift.revenue)} b />
+              <ZRow k="в т.ч. ҚҚС 16%" v={formatTenge(agg.vat)} />
+              <ZRow k="без НДС" v={formatTenge(+(shift.revenue - agg.vat).toFixed(2))} />
+              <div className="border-t border-dashed my-2" /><div className="text-gray-500">По типам оплаты:</div>
+              {Object.keys(agg.byType).length === 0 ? <div className="text-gray-400">— нет —</div>
+                : Object.entries(agg.byType).map(([k, v]) => <ZRow key={k} k={k} v={formatTenge(v)} />)}
+              <div className="border-t border-dashed my-2" />
+              <ZRow k="Скидки" v={formatTenge(agg.disc)} />
+              <ZRow k="Надбавки" v={formatTenge(agg.surch)} />
+              <ZRow k="Возвраты" v={'− ' + formatTenge(agg.refundsSum)} />
+              <div className="text-center text-xs text-gray-400 mt-3 border-t pt-2">Архивный Z-отчёт — смена уже закрыта.</div>
+            </div>
+            <div className="px-5 py-3 border-t flex gap-3 justify-end font-sans">
+              <button onClick={() => setShowZ(false)} className="h-11 px-5 rounded-md border border-gray-300 hover:bg-gray-100">Закрыть</button>
+              <button onClick={() => { printToast(`Z-отчёт смены №${shift.no} распечатан (Webkassa)`); setShowZ(false) }}
+                className="h-11 px-6 rounded-md bg-rose-600 text-white">Печать</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+const ZRow = ({ k, v, b }: { k: string; v: string; b?: boolean }) => (
+  <div className={`flex justify-between py-0.5 gap-3 ${b ? 'font-bold' : ''}`}><span>{k}</span><span className="whitespace-nowrap">{v}</span></div>
+)
