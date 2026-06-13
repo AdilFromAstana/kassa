@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -79,6 +79,31 @@ export const clubCardSeed: ClubCard[] = [
 ]
 
 // iikoCard — бонусная программа лояльности (модуль 15) + карты гостей с балансом бонусов.
+// ───────── Администрирование (модуль 12): лицензии, печатные формы, устройства ввода ─────────
+export const licenseClientIdSeed = 'KZ-7700-MUMTAZ'
+export const licensesSeed: License[] = [
+  { id: 'l-server', module: 'iikoServer RMS', count: 1, from: '2026-01-01', to: '2026-12-31' },
+  { id: 'l-front', module: 'iikoFront (TableService)', count: 2, from: '2026-01-01', to: '2026-12-31' },
+  { id: 'l-office', module: 'iikoOffice', count: 1, from: '2026-01-01', to: '2026-12-31' },
+  { id: 'l-kitchen', module: 'iikoKitchen (KDS)', count: 1, from: '2026-01-01', to: '2026-12-31' },
+  { id: 'l-delivery', module: 'iikoDelivery', count: 1, from: '2026-01-01', to: '2026-12-31' },
+  { id: 'l-card', module: 'iikoCard (лояльность)', count: 1, from: '2026-01-01', to: '2026-12-31' },
+]
+export const printTemplatesSeed: PrintTemplate[] = [
+  { id: 'pt-cheque', name: 'Фискальный чек', type: 'Чек', kind: 'standard' },
+  { id: 'pt-precheck', name: 'Пречек (предварительный счёт)', type: 'Пречек', kind: 'standard' },
+  { id: 'pt-goods', name: 'Товарный чек', type: 'Товарный чек', kind: 'standard' },
+  { id: 'pt-zreport', name: 'Z-отчёт смены', type: 'Z-отчёт', kind: 'standard' },
+  { id: 'pt-invoice', name: 'Приходная накладная (РК)', type: 'Приходная накладная', kind: 'standard' },
+  { id: 'pt-writeoff', name: 'Акт списания (РК)', type: 'Акт списания', kind: 'standard' },
+  { id: 'pt-kitchen', name: 'Марка на кухню', type: 'Сервисный чек', kind: 'custom' },
+]
+export const inputDevicesSeed: InputDevice[] = [
+  { id: 'd-kbd', name: 'Клавиатура', type: 'Клавиатура', group: 'keyboard' },
+  { id: 'd-scan', name: 'Сканер ШК (USB)', type: 'Сканер штрихкода', group: 'pos' },
+  { id: 'd-msr', name: 'Считыватель карт', type: 'Считыватель магнитных карт', group: 'keyboard' },
+]
+
 export const loyaltyProgramSeed: LoyaltyProgram = { active: true, accrualPct: 5, redeemLimitPct: 50, welcomeBonus: 1000 }
 export const loyaltyCardsSeed: LoyaltyCard[] = [
   { id: 'lc-1', number: '7711 0001', owner: 'Данияр К.', phone: '+7 701 111 22 33', balance: 4200 },

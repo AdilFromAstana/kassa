@@ -328,6 +328,12 @@ export interface Invoice {
   kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
 }
 
+// ───────── Администрирование (модуль 12) ─────────
+// Лицензия iiko (модуль/количество/срок), Шаблон печатной формы, Устройство ввода.
+export interface License { id: string; module: string; count: number; from: string; to: string }
+export interface PrintTemplate { id: string; name: string; type: string; kind: 'standard' | 'custom' }
+export interface InputDevice { id: string; name: string; type: string; group: 'keyboard' | 'pos' }
+
 export interface Message {
   id: number
   from: string

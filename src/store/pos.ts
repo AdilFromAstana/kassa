@@ -3,12 +3,12 @@ import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
-  MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram,
+  MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
-  loyaltyProgramSeed, loyaltyCardsSeed } from '../mock/data'
+  loyaltyProgramSeed, loyaltyCardsSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 import { todayISO } from '../lib/date'
 
@@ -162,6 +162,12 @@ function loadLoyaltyCards(): LoyaltyCard[] {
   return loyaltyCardsSeed.map((c) => ({ ...c }))
 }
 function persistLoyaltyCards(list: LoyaltyCard[]) { try { localStorage.setItem('iiko-loyalty-cards', JSON.stringify(list)) } catch { /* ignore */ } }
+// Администрирование (модуль 12): лицензии, печатные формы, устройства ввода.
+function loadAdmin<T>(key: string, seed: T): T {
+  try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return seed
+}
+function persistAdmin(key: string, val: unknown) { try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* ignore */ } }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
@@ -325,6 +331,10 @@ interface PosState {
   payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
   loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard (офис → касса)
   loyaltyCards: LoyaltyCard[]    // карты гостей iikoCard с балансом бонусов
+  licenseClientId: string        // Администрирование: клиентский ID лицензии
+  licenses: License[]            // установленные лицензии (модуль/количество/срок)
+  printTemplates: PrintTemplate[] // шаблоны печатных форм (стандартные/пользовательские)
+  inputDevices: InputDevice[]    // устройства ввода (сканер/считыватель/клавиатура)
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -374,6 +384,13 @@ interface PosState {
   removeLoyaltyCard: (id: string) => void
   attachLoyaltyCard: (orderId: number, cardId: string | undefined) => void
   adjustBonus: (cardId: string, delta: number) => void // начисление (+) / списание (−) бонусов
+  setLicenseClientId: (id: string) => void
+  addLicense: (l: Omit<License, 'id'>) => void
+  removeLicense: (id: string) => void
+  addPrintTemplate: (name: string, type: string) => void
+  removePrintTemplate: (id: string) => void
+  addInputDevice: (d: Omit<InputDevice, 'id'>) => void
+  removeInputDevice: (id: string) => void
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -519,6 +536,10 @@ export const usePos = create<PosState>((set, get) => ({
   payProfiles: loadPayProfiles(),
   loyaltyProgram: loadLoyaltyProgram(),
   loyaltyCards: loadLoyaltyCards(),
+  licenseClientId: loadAdmin('iiko-license-clientid', licenseClientIdSeed),
+  licenses: loadAdmin('iiko-licenses', licensesSeed.map((l) => ({ ...l }))),
+  printTemplates: loadAdmin('iiko-print-templates', printTemplatesSeed.map((t) => ({ ...t }))),
+  inputDevices: loadAdmin('iiko-input-devices', inputDevicesSeed.map((d) => ({ ...d }))),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -721,6 +742,38 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.loyaltyCards.map((c) => (c.id === cardId ? { ...c, balance: +(c.balance + delta).toFixed(2) } : c))
     persistLoyaltyCards(list)
     return { loyaltyCards: list }
+  }),
+  // ───────── Администрирование (модуль 12) ─────────
+  setLicenseClientId: (id) => { persistAdmin('iiko-license-clientid', id); set({ licenseClientId: id }) },
+  addLicense: (l) => set((st) => {
+    const list = [...st.licenses, { ...l, id: 'l-' + (st.licenses.length + 1) }]
+    persistAdmin('iiko-licenses', list)
+    return { licenses: list }
+  }),
+  removeLicense: (id) => set((st) => {
+    const list = st.licenses.filter((l) => l.id !== id)
+    persistAdmin('iiko-licenses', list)
+    return { licenses: list }
+  }),
+  addPrintTemplate: (name, type) => set((st) => {
+    const list = [...st.printTemplates, { id: 'pt-c' + (st.printTemplates.length + 1), name, type, kind: 'custom' as const }]
+    persistAdmin('iiko-print-templates', list)
+    return { printTemplates: list }
+  }),
+  removePrintTemplate: (id) => set((st) => {
+    const list = st.printTemplates.filter((t) => t.id !== id)
+    persistAdmin('iiko-print-templates', list)
+    return { printTemplates: list }
+  }),
+  addInputDevice: (d) => set((st) => {
+    const list = [...st.inputDevices, { ...d, id: 'd-' + (st.inputDevices.length + 1) }]
+    persistAdmin('iiko-input-devices', list)
+    return { inputDevices: list }
+  }),
+  removeInputDevice: (id) => set((st) => {
+    const list = st.inputDevices.filter((d) => d.id !== id)
+    persistAdmin('iiko-input-devices', list)
+    return { inputDevices: list }
   }),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
