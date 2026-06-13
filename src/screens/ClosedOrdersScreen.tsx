@@ -19,6 +19,7 @@ export default function ClosedOrdersScreen() {
   const [selNo, setSelNo] = useState<string | null>(closedOrders[0]?.fiscalDocNo ?? null)
   const [pickedQty, setPickedQty] = useState<Record<string, number>>({})
   const [changing, setChanging] = useState(false)
+  const [splitAmt, setSplitAmt] = useState<Record<string, string>>({}) // частичная смена типа оплаты: ptId → сумма
   const [q, setQ] = useState('') // поиск по № заказа / официанту
   const canChangePay = can('F_CHPAY')
   const visible = closedOrders.filter((o) => !q || String(o.id).includes(q.trim()) || o.waiter.toLowerCase().includes(q.trim().toLowerCase()))
@@ -65,11 +66,25 @@ export default function ClosedOrdersScreen() {
     }
     setRefundReq(null)
   }
-  const doChange = (ptId: string) => {
+  const openChange = () => {
     if (!order) return
-    const pt = paymentTypes.find((p) => p.id === ptId)!
-    changePaymentType(order.fiscalDocNo, [{ paymentTypeId: pt.id, name: pt.name, amount: order.total }])
-    setChanging(false)
+    // префилл: текущая оплата заказа в редактор
+    const pre: Record<string, string> = {}
+    for (const p of order.payments) pre[p.paymentTypeId] = String(+(((pre[p.paymentTypeId] ? +pre[p.paymentTypeId] : 0) + p.amount)).toFixed(2))
+    setSplitAmt(pre); setChanging(true)
+  }
+  const parseAmt = (s: string) => parseFloat((s || '0').replace(',', '.')) || 0
+  const splitSum = order ? +Object.values(splitAmt).reduce((s, v) => s + parseAmt(v), 0).toFixed(2) : 0
+  const splitDiff = order ? +(splitSum - order.total).toFixed(2) : 0
+  const applyChange = () => {
+    if (!order || Math.abs(splitDiff) > 0.01) return
+    const payments = paymentTypes
+      .filter((pt) => parseAmt(splitAmt[pt.id]) > 0)
+      .map((pt) => ({ paymentTypeId: pt.id, name: pt.name, amount: parseAmt(splitAmt[pt.id]) }))
+    if (payments.length === 0) return
+    changePaymentType(order.fiscalDocNo, payments)
+    printToast(`Тип оплаты изменён: ${payments.map((p) => `${p.name} ${formatTenge(p.amount)}`).join(', ')}`)
+    setChanging(false); setSplitAmt({})
   }
 
   const selectOrder = (o: ClosedOrder) => { setSelNo(o.fiscalDocNo); setPickedQty({}) }
@@ -151,20 +166,34 @@ export default function ClosedOrdersScreen() {
                   className="h-11 px-4 rounded-md bg-pos-rose text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed">
                   {anyReturned ? 'Возврат остатка' : 'Полный возврат'}
                 </button>
-                <button onClick={() => setChanging(true)} disabled={!canChangePay}
+                <button onClick={openChange} disabled={!canChangePay}
                   className="h-11 px-4 rounded-md bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                   title={canChangePay ? '' : 'Нужно право F_CHPAY'}>Изменить тип оплаты</button>
                 <button onClick={() => printToast('Товарный чек')} className="h-11 px-4 rounded-md bg-white/10">Печать товарного</button>
               </div>
 
               {changing && (
-                <div className="mt-3 bg-white/5 rounded-lg p-3">
-                  <div className="text-sm text-white/60 mb-2">Новый тип оплаты для всего заказа:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {paymentTypes.map((pt) => (
-                      <button key={pt.id} onClick={() => doChange(pt.id)} className="h-10 px-4 rounded-md bg-pos-blue">{pt.name}</button>
+                <div className="mt-3 bg-white/5 rounded-lg p-3 max-w-md">
+                  <div className="text-sm text-white/60 mb-2">Распределите сумму заказа ({formatTenge(order.total)}) по типам оплаты:</div>
+                  <div className="space-y-1.5">
+                    {paymentTypes.filter((pt) => pt.active).map((pt) => (
+                      <div key={pt.id} className="flex items-center gap-2">
+                        <span className="flex-1 text-sm">{pt.name}</span>
+                        <input value={splitAmt[pt.id] ?? ''} onChange={(e) => setSplitAmt((s) => ({ ...s, [pt.id]: e.target.value.replace(/[^\d.,]/g, '') }))}
+                          inputMode="decimal" placeholder="0" className="w-28 h-9 rounded px-2 text-gray-800 text-right" />
+                        <button onClick={() => setSplitAmt((s) => ({ ...s, [pt.id]: String(+(parseAmt(splitAmt[pt.id] ?? '') - splitDiff).toFixed(2)) }))}
+                          className="h-9 px-2 rounded bg-white/10 text-xs" title="дозаполнить до итога">остаток</button>
+                      </div>
                     ))}
-                    <button onClick={() => setChanging(false)} className="h-10 px-4 rounded-md bg-gray-600">Отмена</button>
+                  </div>
+                  <div className={`flex justify-between text-sm mt-2 ${Math.abs(splitDiff) < 0.01 ? 'text-pos-green' : 'text-pos-rose'}`}>
+                    <span>Распределено: {formatTenge(splitSum)}</span>
+                    <span>{splitDiff === 0 ? '✓ сходится' : splitDiff > 0 ? `излишек ${formatTenge(splitDiff)}` : `не хватает ${formatTenge(-splitDiff)}`}</span>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={applyChange} disabled={Math.abs(splitDiff) > 0.01}
+                      className="h-10 px-4 rounded-md bg-pos-green text-white disabled:opacity-40">Применить</button>
+                    <button onClick={() => { setChanging(false); setSplitAmt({}) }} className="h-10 px-4 rounded-md bg-gray-600">Отмена</button>
                   </div>
                 </div>
               )}
