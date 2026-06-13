@@ -13,10 +13,10 @@ const DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20]
 // Мастер закрытия кассовой смены (FRONT_03 §5.3): незакрытые заказы → пересчёт → отчёты → Z-отчёт.
 export default function ShiftCloseScreen() {
   const navigate = useNavigate()
-  const { orders, closedOrders, cashShift, cashMovements, closeCashShift, forceCloseOrder } = usePos()
+  const { orders, closedOrders, cashShift, cashMovements, closeCashShift, forceCloseOrder, addCashMovement } = usePos()
   const [step, setStep] = useState(1)
   const [denoms, setDenoms] = useState<Record<number, string>>({})
-  const [withdrawn, setWithdrawn] = useState('')
+  const [fundStr, setFundStr] = useState('') // разменный фонд, оставляемый на след. смену
 
   const cashSales = closedOrders
     .flatMap((o) => o.payments)
@@ -30,19 +30,26 @@ export default function ShiftCloseScreen() {
   // купюрная раскладка → фактически пересчитанная сумма наличных
   const counted = DENOMS.reduce((s, d) => s + d * (parseInt(denoms[d] || '', 10) || 0), 0)
   const diff = +(counted - cashExpected).toFixed(2)
-  const withdrawnNum = withdrawn === '' ? cashExpected : (parseFloat(withdrawn) || 0)
-  const withdrawDiff = +(withdrawnNum - cashExpected).toFixed(2)
+
+  // инкассация: оставляем разменный фонд (по умолч. фонд открытия), остальное инкассируется
+  const defaultFund = cashShift?.openingCash ?? 0
+  const fund = fundStr === '' ? defaultFund : (parseFloat(fundStr) || 0)
+  const collected = Math.max(0, +(cashExpected - fund).toFixed(2)) // сумма инкассации
 
   const setDenom = (d: number, v: string) => setDenoms((s) => ({ ...s, [d]: v.replace(/\D/g, '') }))
 
-  const finish = () => { printToast(`Z-отчёт · смена №${cashShift?.no} закрыта (гашение ФР)`); closeCashShift(); navigate('/menu') }
+  const finish = () => {
+    if (collected > 0) addCashMovement('out', 'Инкассация', collected, `Инкассация при закрытии смены №${cashShift?.no}`)
+    printToast(`Инкассация ${formatTenge(collected)} · разменный фонд ${formatTenge(fund)}\nZ-отчёт · смена №${cashShift?.no} закрыта (гашение ФР)`)
+    closeCashShift(); navigate('/menu')
+  }
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
       <TopBar title={`Закрытие кассовой смены №${cashShift?.no ?? ''}`} />
       <div className="flex-1 overflow-auto p-6">
         <div className="flex gap-2 mb-6 text-sm">
-          {['Незакрытые заказы', 'Контрольный пересчёт', 'Отчёты', 'Z-отчёт'].map((t, i) => (
+          {['Незакрытые заказы', 'Контрольный пересчёт', 'Инкассация', 'Отчёты', 'Z-отчёт'].map((t, i) => (
             <div key={t} className={`px-3 py-1 rounded-full ${step === i + 1 ? 'bg-pos-accent text-black' : 'bg-white/10'}`}>{i + 1}. {t}</div>
           ))}
         </div>
@@ -103,6 +110,22 @@ export default function ShiftCloseScreen() {
 
         {step === 3 && (
           <div className="max-w-md">
+            <div className="mb-3 text-white/70">Инкассация — изъятие выручки из кассы (в сейф/банк), оставляя разменный фонд на следующую смену:</div>
+            <div className="bg-white/5 rounded-lg p-4 text-sm space-y-1">
+              <div className="flex justify-between"><span>Расчётная наличность в ящике:</span><b>{formatTenge(cashExpected)}</b></div>
+              <label className="flex justify-between items-center pt-1">
+                <span>Разменный фонд (оставить):</span>
+                <input value={fundStr} onChange={(e) => setFundStr(e.target.value.replace(/[^\d.]/g, ''))}
+                  placeholder={String(defaultFund)} className="w-32 h-9 rounded px-2 text-black text-right" />
+              </label>
+              <div className="flex justify-between border-t border-white/10 pt-1 text-pos-accent"><span>К инкассации:</span><b>{formatTenge(collected)}</b></div>
+            </div>
+            <div className="text-xs text-white/40 mt-2">Инкассируемая сумма спишется из кассы операцией «Инкассация» (изъятие). Разменный фонд остаётся в ящике для размена.</div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="max-w-md">
             <div className="mb-3 text-white/70">Отчёты к печати при закрытии смены:</div>
             {['041 Выручка по типам с налогами', '043 Продажи блюд', '045 Полный отчёт кассовой смены', '048 Итого по смене'].map((r) => (
               <label key={r} className="flex items-center gap-2 py-1"><input type="checkbox" defaultChecked /> {r}</label>
@@ -111,19 +134,14 @@ export default function ShiftCloseScreen() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="max-w-md">
-            <div className="mb-3 text-white/70">Изъятие наличных и печать <b>Z-отчёта</b> (гашение ФР Webkassa):</div>
+            <div className="mb-3 text-white/70">Печать <b>Z-отчёта</b> (гашение ФР Webkassa) и закрытие смены:</div>
             <div className="bg-white/5 rounded-lg p-4 text-sm space-y-1">
               <div className="flex justify-between"><span>Выручка за смену:</span><b>{formatTenge(revenue)}</b></div>
               <div className="flex justify-between"><span>Чеков закрыто:</span><b>{closedOrders.length}</b></div>
-              <div className="flex justify-between"><span>К изъятию (расчётно):</span><b>{formatTenge(cashExpected)}</b></div>
-              <label className="flex justify-between items-center pt-2 border-t border-white/10">
-                <span>Изъято физически:</span>
-                <input value={withdrawn} onChange={(e) => setWithdrawn(e.target.value.replace(/[^\d.]/g, ''))}
-                  placeholder={String(cashExpected)} className="w-32 h-9 rounded px-2 text-black text-right" />
-              </label>
-              <div className={`flex justify-between ${withdrawDiff === 0 ? 'text-pos-green' : 'text-pos-rose'}`}><span>Расхождение изъятия:</span><b>{formatTenge(withdrawDiff)}</b></div>
+              <div className="flex justify-between border-t border-white/10 pt-1"><span>Инкассировано:</span><b>{formatTenge(collected)}</b></div>
+              <div className="flex justify-between"><span>Разменный фонд оставлен:</span><b>{formatTenge(fund)}</b></div>
             </div>
             <div className="text-xs text-white/40 mt-2">После закрытия счётчик ФР гасится, смена №{cashShift?.no} закрывается.</div>
           </div>
@@ -132,7 +150,7 @@ export default function ShiftCloseScreen() {
 
       <div className="h-16 bg-white text-gray-700 flex items-center px-4 gap-4">
         <BackButton onClick={() => (step === 1 ? navigate('/menu') : setStep(step - 1))} label={step === 1 ? 'ОТМЕНА' : 'НАЗАД'} />
-        {step < 4
+        {step < 5
           ? <button onClick={() => setStep(step + 1)} className="ml-auto h-12 px-10 rounded-md bg-pos-blue text-white">Далее ›</button>
           : <button onClick={finish} className="ml-auto h-12 px-10 rounded-md bg-pos-green text-white">Закрыть смену + Z-отчёт</button>}
       </div>
