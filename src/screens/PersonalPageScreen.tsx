@@ -1,18 +1,34 @@
 import { useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
-import { Megaphone, Calendar } from 'lucide-react'
-import { usePos } from '../store/pos'
+import { Megaphone, Calendar, Trophy } from 'lucide-react'
+import { usePos, lineTotal } from '../store/pos'
+import { findDish } from '../mock/menu'
 import { formatTenge } from '../lib/money'
 import TopBar from '../components/TopBar'
 
-// Личная страница (iikoFront): результат работы по датам + итоги месяца (ЛП/СПЧ) + управление личной сменой.
+// Личная страница (iikoFront): результат работы по датам + итоги месяца (ЛП/СПЧ) + мотивация + управление личной сменой.
 export default function PersonalPageScreen() {
   const navigate = useNavigate()
-  const { user, personalShift, closedOrders, closePersonalShift } = usePos()
+  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms } = usePos()
 
   const myClosed = closedOrders.filter((o) => o.waiter === user?.name)
   const personalSales = myClosed.reduce((s, o) => s + o.total, 0) // ЛП — личные продажи
   const avg = myClosed.length ? personalSales / myClosed.length : 0
+
+  // прогресс по мотивационным программам: квалифицирующие продажи сотрудника + начисленная премия
+  const myLines = myClosed.flatMap((o) => o.lines)
+  const motivation = motivationPrograms.filter((m) => m.active).map((m) => {
+    const lines = myLines.filter((l) => m.scope === 'all'
+      || (m.scope === 'dish' && l.dishId === m.targetId)
+      || (m.scope === 'group' && findDish(l.dishId)?.groupId === m.targetId))
+    const qty = lines.reduce((s, l) => s + l.qty, 0)
+    const revenue = lines.reduce((s, l) => s + lineTotal(l), 0)
+    const reached = !m.minQty || qty >= m.minQty
+    const earned = reached ? (m.mode === 'percent' ? +(revenue * m.value / 100).toFixed(0) : qty * m.value) : 0
+    const progress = m.minQty ? Math.min(1, qty / m.minQty) : (qty > 0 ? 1 : 0)
+    return { m, qty, revenue, earned, reached, progress }
+  })
+  const motivationTotal = motivation.reduce((s, x) => s + x.earned, 0)
 
   // результат по датам
   const byDate: Record<string, { sales: number; count: number }> = {}
@@ -78,6 +94,29 @@ export default function PersonalPageScreen() {
             <Stat label="Сред. продажи в час (СПЧ)" value={formatTenge(perHour)} />
           </div>
 
+          {/* прогресс мотивации */}
+          <div className="text-pos-accent text-sm uppercase mb-2 flex items-center gap-2"><Trophy size={15} />Прогресс мотивации</div>
+          <div className="bg-white/5 rounded-lg p-4 mb-6 max-w-2xl space-y-3">
+            {motivation.length === 0 && <div className="text-white/40 text-sm">Активных программ нет.</div>}
+            {motivation.map(({ m, qty, earned, reached, progress }) => (
+              <div key={m.id}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span>{m.name} <span className="text-white/40">· {m.mode === 'percent' ? `${m.value}%` : `${formatTenge(m.value)}/шт`}</span></span>
+                  <span className={reached ? 'text-pos-green font-medium' : 'text-white/50'}>{formatTenge(earned)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div className={`h-full ${reached ? 'bg-pos-green' : 'bg-pos-accent'}`} style={{ width: `${Math.round(progress * 100)}%` }} />
+                </div>
+                <div className="text-xs text-white/40 mt-0.5">
+                  {m.minQty ? `продано ${qty} из ${m.minQty} (порог премии)` : `продано ${qty} шт`}
+                </div>
+              </div>
+            ))}
+            {motivation.length > 0 && (
+              <div className="flex justify-between border-t border-white/10 pt-2 font-bold"><span>Премия к начислению</span><span className="text-pos-green">{formatTenge(motivationTotal)}</span></div>
+            )}
+          </div>
+
           <div className="bg-white/5 rounded-lg p-4 max-w-md">
             <div className="text-pos-accent text-sm uppercase mb-2">Начисления (мок)</div>
             <Row k="Бонусы" v="12 000 ₸" />
@@ -89,8 +128,13 @@ export default function PersonalPageScreen() {
       </div>
       <div className="h-16 bg-white flex items-center px-4 gap-4">
         <BackButton onClick={() => navigate('/menu')} />
-        <button onClick={() => { closePersonalShift(); navigate('/') }}
-          className="ml-auto h-12 px-8 rounded-md bg-pos-blue text-white">ЗАКРЫТЬ ЛИЧНУЮ СМЕНУ</button>
+        {personalShift ? (
+          <button onClick={() => { closePersonalShift(); navigate('/') }}
+            className="ml-auto h-12 px-8 rounded-md bg-pos-blue text-white">ЗАКРЫТЬ ЛИЧНУЮ СМЕНУ</button>
+        ) : (
+          <button onClick={() => { openPersonalShift(user?.positions[0] ?? 'Официант'); navigate('/menu') }}
+            className="ml-auto h-12 px-8 rounded-md bg-pos-green text-white">ОТКРЫТЬ ЛИЧНУЮ СМЕНУ</button>
+        )}
       </div>
     </div>
   )
