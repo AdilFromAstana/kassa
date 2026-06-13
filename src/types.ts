@@ -95,7 +95,7 @@ export interface Order {
   discountPct: number
   surchargePct: number
   openedAt: string
-  status: 'open' | 'precheck' | 'paid'
+  status: 'open' | 'precheck' | 'fiscalized' | 'paid'
 }
 
 export type PaymentKind = 'cash' | 'card' | 'noRevenue' | 'cashless' | 'bonus'
@@ -198,6 +198,7 @@ export interface Establishment {
   banquets: boolean      // банкеты и резервы
   delivery: boolean      // доставка (iikoDelivery)
   iikoCard: boolean      // лояльность
+  fiscalBeforePay: boolean // раздельная печать фискального чека перед оплатой (iikoFront 9.x, приходит из офиса)
   frCount: 1 | 2         // число фискальных регистраторов
 }
 

@@ -17,6 +17,7 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'banquets', label: 'Банкеты и резервы', note: 'раздел «Банкеты» в меню' },
   { key: 'delivery', label: 'Доставка (iikoDelivery)', note: 'адрес, курьеры (в разработке)' },
   { key: 'iikoCard', label: 'iikoCard (лояльность)', note: 'бонусы в оплате (в разработке)' },
+  { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать фискального чека перед приёмом денег (9.x)' },
 ]
 
 export default function SettingsScreen() {

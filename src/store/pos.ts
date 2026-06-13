@@ -35,7 +35,7 @@ const nextUid = () => `l${uidSeq++}`
 const DEFAULT_ESTABLISHMENT: Establishment = {
   name: 'Ресторан (KZ)', mode: 'restaurant',
   precheck: true, comments: true, courses: true, tab: false, mix: false,
-  kitchenScreen: false, banquets: true, delivery: false, iikoCard: false, frCount: 1,
+  kitchenScreen: false, banquets: true, delivery: false, iikoCard: false, fiscalBeforePay: false, frCount: 1,
 }
 function loadEstablishment(): Establishment {
   try {
@@ -134,6 +134,7 @@ interface PosState {
   setDiscount: (pct: number) => void
   setSurcharge: (pct: number) => void
   precheck: () => void
+  fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
   payByGuest: (guestNo: number, payments: PaymentSplit[], received: number) => ClosedOrder | null
 
@@ -303,6 +304,10 @@ export const usePos = create<PosState>((set, get) => ({
   })),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
+  })),
+
+  fiscalizeOrder: () => set((st) => ({
+    orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'fiscalized' } : o)),
   })),
 
   pay: (payments, received) => {

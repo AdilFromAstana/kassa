@@ -74,6 +74,8 @@ export default function PaymentScreen() {
   const paid = +lines.reduce((s, id) => s + amountOf(id), 0).toFixed(2)
   const toPayLeft = Math.max(0, +(total - paid).toFixed(2)) // «ВНЕСТИ»
   const change = Math.max(0, +(paid - total).toFixed(2))    // «СДАЧА»
+  const fiscalSep = pos.establishment.fiscalBeforePay // 9.x: раздельная печать фискального чека перед оплатой
+  const isFiscalized = order!.status === 'fiscalized'
 
   const selectTab = (id: string) => { setActive(id); setLines((ls) => (ls.includes(id) ? ls : [...ls, id])) }
   const setActiveEntry = (s: string) => setEntry((e) => ({ ...e, [active]: s }))
@@ -88,13 +90,23 @@ export default function PaymentScreen() {
     if (active === id) setActive('p-cash')
   }
 
+  const splitsNow = (): PaymentSplit[] => lines
+    .filter((id) => amountOf(id) > 0)
+    .map((id) => ({ paymentTypeId: id, name: nameOf(id), amount: amountOf(id) }))
+
   const doPay = () => {
-    const splits: PaymentSplit[] = lines
-      .filter((id) => amountOf(id) > 0)
-      .map((id) => ({ paymentTypeId: id, name: nameOf(id), amount: amountOf(id) }))
+    const splits = splitsNow()
     if (splits.length === 0) return
     const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid) : pos.pay(splits, paid)
     if (closed) setReceipt(closed)
+  }
+
+  // 9.x: печать фискального чека ДО оплаты — стол не закрывается, заказ переходит в стадию оплаты
+  const doFiscal = () => {
+    const splits = splitsNow()
+    if (splits.length === 0) return
+    printToast(`Фискальный чек (Webkassa) на ${formatTenge(total)} · ${splits.map((s) => s.name).join(', ')}\nСтол не закрыт — примите оплату`)
+    pos.fiscalizeOrder()
   }
 
   const tableLabel = order!.tableId ? `Стол #${findTable(order!.tableId)?.no ?? order!.tableId.replace(/^t-/, '')}` : 'Быстрый чек'
@@ -149,6 +161,7 @@ export default function PaymentScreen() {
             <span className="text-white/70">К ОПЛАТЕ:</span>
             <span className="text-2xl font-bold">{formatTenge(total)}</span>
           </div>
+          {fiscalSep && isFiscalized && <div className="mx-4 mb-2 text-pos-accent text-sm">✓ Фискальный чек напечатан — примите оплату</div>}
           <div className="flex-1 overflow-auto">
             {lines.map((id) => (
               <button key={id} onClick={() => setActive(id)}
@@ -205,10 +218,21 @@ export default function PaymentScreen() {
         <BarBtn onClick={() => navigate('/order')} Icon={UtensilsCrossed} label="ЗАКАЗ" />
         <BarBtn onClick={() => printToast('Товарный чек')} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
         <BarBtn onClick={() => printToast('Чек отправлен')} Icon={Send} label="ОТПРАВКА ЧЕКА" />
-        <button onClick={doPay} disabled={paid < total || total <= 0}
-          className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= total && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
-          ОПЛАТИТЬ
-        </button>
+        {!fiscalSep ? (
+          <button onClick={doPay} disabled={paid < total || total <= 0}
+            className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= total && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
+            ОПЛАТИТЬ
+          </button>
+        ) : !isFiscalized ? (
+          <button onClick={doFiscal} disabled={paid < total || total <= 0}
+            className={`ml-auto h-12 px-10 rounded-md text-xl font-light ${paid >= total && total > 0 ? 'bg-pos-accent text-gray-900' : 'text-white/30'}`}>
+            ФИСКАЛЬНЫЙ ЧЕК
+          </button>
+        ) : (
+          <button onClick={doPay} className="ml-auto h-12 px-10 rounded-md text-xl font-light bg-pos-green text-white active:opacity-90">
+            ЗАКРЫТЬ ЗАКАЗ
+          </button>
+        )}
       </div>
     </div>
   )
