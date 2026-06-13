@@ -41,6 +41,32 @@ export default function ClosedShiftsScreen() {
           {!shift ? <div className="text-white/40">Выберите смену слева</div> : (
             <div className="max-w-2xl">
               <div className="mb-3 text-sm text-white/60">Смена №{shift.no} · открыта {shift.openedAt} · закрыта {shift.closedAt}</div>
+
+              {/* сводные итоги смены (по типам оплат / скидки / гости) */}
+              {(() => {
+                const byType: Record<string, number> = {}
+                let guests = 0, disc = 0, surch = 0
+                for (const o of shift.orders) {
+                  for (const p of o.payments) byType[p.name] = (byType[p.name] ?? 0) + p.amount
+                  guests += o.guests
+                  const sub = o.lines.reduce((s, l) => s + lineTotal(l), 0)
+                  disc += sub * (o.discountPct || 0) / 100
+                  surch += sub * (o.surchargePct || 0) / 100
+                }
+                return (
+                  <div className="bg-white/5 rounded-lg p-3 mb-4 text-sm grid grid-cols-2 gap-x-8 gap-y-1 max-w-lg">
+                    <div className="flex justify-between"><span className="text-white/50">Выручка:</span><b>{formatTenge(shift.revenue)}</b></div>
+                    <div className="flex justify-between"><span className="text-white/50">Чеков:</span><b>{shift.orders.length}</b></div>
+                    {Object.entries(byType).map(([n, v]) => (
+                      <div key={n} className="flex justify-between"><span className="text-white/50">{n}:</span><span>{formatTenge(v)}</span></div>
+                    ))}
+                    <div className="flex justify-between"><span className="text-white/50">Гостей:</span><span>{guests}</span></div>
+                    <div className="flex justify-between"><span className="text-white/50">Скидки:</span><span>{formatTenge(disc)}</span></div>
+                    <div className="flex justify-between"><span className="text-white/50">Надбавки:</span><span>{formatTenge(surch)}</span></div>
+                  </div>
+                )
+              })()}
+
               {!cashShift && <div className="text-pos-rose text-sm mb-3">Для возврата откройте кассовую смену — возврат проводится на ФР текущей открытой смены.</div>}
               {shift.orders.length === 0 ? <div className="text-white/40">В смене не было закрытых заказов</div> : (
                 <table className="w-full text-sm">

@@ -10,10 +10,13 @@ import RefundModal from '../components/RefundModal'
 // Закрытые заказы + возвраты (частичный/полный) и изменение типа оплаты (FRONT_03 §2.6).
 export default function ClosedOrdersScreen() {
   const navigate = useNavigate()
-  const { closedOrders, refunds, refundOrder, changePaymentType, cashShift, paymentTypes } = usePos()
+  const { closedOrders, refunds, refundOrder, changePaymentType, cashShift, paymentTypes, can } = usePos()
   const [selNo, setSelNo] = useState<string | null>(closedOrders[0]?.fiscalDocNo ?? null)
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [changing, setChanging] = useState(false)
+  const [q, setQ] = useState('') // поиск по № заказа / официанту
+  const canChangePay = can('F_CHPAY')
+  const visible = closedOrders.filter((o) => !q || String(o.id).includes(q.trim()) || o.waiter.toLowerCase().includes(q.trim().toLowerCase()))
   const [refundReq, setRefundReq] = useState<{ uids: string[] | 'all'; amount: number; title: string } | null>(null)
 
   const order = closedOrders.find((o) => o.fiscalDocNo === selNo) ?? null
@@ -51,8 +54,13 @@ export default function ClosedOrdersScreen() {
       <div className="flex-1 flex overflow-hidden">
         {/* список */}
         <div className="w-80 bg-black/30 overflow-auto">
+          <div className="p-2 sticky top-0 bg-black/40">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="поиск: № заказа / официант"
+              className="w-full h-9 rounded px-2 text-gray-800 text-sm outline-none" />
+          </div>
           {closedOrders.length === 0 && <div className="p-4 text-white/40">Нет закрытых заказов</div>}
-          {closedOrders.map((o) => (
+          {closedOrders.length > 0 && visible.length === 0 && <div className="p-4 text-white/40 text-sm">Ничего не найдено</div>}
+          {visible.map((o) => (
             <button key={o.fiscalDocNo} onClick={() => { setSelNo(o.fiscalDocNo); setPicked({}) }}
               className={`w-full text-left px-4 py-2 border-b border-white/10 ${selNo === o.fiscalDocNo ? 'bg-pos-blue' : 'hover:bg-white/5'}`}>
               <div className="flex justify-between"><span>Заказ №{o.id}</span><span>{formatTenge(o.total)}</span></div>
@@ -93,7 +101,9 @@ export default function ClosedOrdersScreen() {
                   Частичный возврат{pickedUids.length > 0 ? ` (${formatTenge(pickedSum)})` : ''}
                 </button>
                 <button onClick={doFull} disabled={!cashShift} className="h-11 px-4 rounded-md bg-pos-rose text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed">Полный возврат</button>
-                <button onClick={() => setChanging(true)} className="h-11 px-4 rounded-md bg-white/10">Изменить тип оплаты</button>
+                <button onClick={() => setChanging(true)} disabled={!canChangePay}
+                  className="h-11 px-4 rounded-md bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={canChangePay ? '' : 'Нужно право F_CHPAY'}>Изменить тип оплаты</button>
                 <button onClick={() => printToast('Товарный чек')} className="h-11 px-4 rounded-md bg-white/10">Печать товарного</button>
               </div>
 

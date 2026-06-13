@@ -17,6 +17,7 @@ export const RIGHTS: Record<string, string> = {
   F_ID: 'Ручная скидка / надбавка',
   F_CCB: 'Отмена пречека',
   F_CVS: 'Редактировать явки',
+  F_CHPAY: 'Изменять тип оплаты закрытого заказа',
   F_VRPT: 'Отчёты во Front',
   F_CHO: 'Открывать заказы',
   F_CPBA: 'Печать пречека',
@@ -30,9 +31,9 @@ export const RIGHTS: Record<string, string> = {
 export const POSITION_RIGHTS: Record<string, string[]> = {
   Официант: ['F_CHO', 'F_CPBA', 'F_VRS'],
   Бармен: ['F_CHO', 'F_CPBA', 'F_VRS'],
-  Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT'],
+  Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT', 'F_CHPAY'],
   Менеджер: [
-    'F_EM', 'F_STRN', 'F_SWWOFF', 'F_ID', 'F_CCB', 'F_CVS', 'F_VRPT', 'F_ZREP', 'F_ERS', 'F_VRS', 'F_AOT',
+    'F_EM', 'F_STRN', 'F_SWWOFF', 'F_ID', 'F_CCB', 'F_CVS', 'F_CHPAY', 'F_VRPT', 'F_ZREP', 'F_ERS', 'F_VRS', 'F_AOT',
     'F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA',
   ],
 }
