@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -58,6 +58,18 @@ export const cashOpTypeSeed = [
   ...cashOutTypes.map((name, i) => ({ id: `co-${i}`, name, direction: 'out' as const, manual: true })),
 ]
 export const writeoffReasonSeed = ['Бой / порча', 'Просрочка', 'Проработка', 'Дегустация', 'Прочее']
+
+// Дисконтная система (раздел 10): скидки/надбавки + клубные карты — настраиваются в офисе.
+export const discountSeed: Discount[] = [
+  { id: 'd-staff', name: 'Скидка персоналу', chequeName: 'Скидка персоналу', kind: 'discount', percent: 20, manual: true, byCard: false, auto: false },
+  { id: 'd-gold', name: 'Золотая карта', chequeName: 'Скидка по карте', kind: 'discount', percent: 10, manual: false, byCard: true, auto: false },
+  { id: 'd-happy', name: 'Счастливый час', chequeName: 'Happy hour', kind: 'discount', percent: 15, manual: true, byCard: false, auto: false, fromTime: '14:00', toTime: '16:00' },
+  { id: 'd-banket', name: 'Скидка от 50 000 ₸', kind: 'discount', percent: 5, manual: true, byCard: false, auto: false, minSum: 50000 },
+  { id: 's-service', name: 'Надбавка за обслуживание', chequeName: 'Обслуживание', kind: 'surcharge', percent: 10, manual: true, byCard: false, auto: false },
+]
+export const clubCardSeed: ClubCard[] = [
+  { id: 'card-1', number: '7700 0001', owner: 'Алия Ж.', discountId: 'd-gold' },
+]
 
 // Стартовые банкеты/резервы (мок).
 export const initialBanquets: Banquet[] = [

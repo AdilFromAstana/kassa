@@ -27,12 +27,13 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
+type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'prikazy', label: 'Прейскурант (приказы)' },
   { id: 'retail', label: 'Розничные продажи' },
+  { id: 'discount', label: 'Дисконтная система' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
@@ -42,14 +43,15 @@ const NAV: { id: Section; label: string }[] = [
 const SECTION_TITLE: Record<Section, string> = {
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания',
+  discount: 'Дисконтная система — скидки/надбавки и клубные карты',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
 }
 
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'stock', 'accounting', 'payroll', 'reports'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'stock', 'accounting', 'payroll', 'reports'],
   'Бухгалтер': ['accounting', 'payroll', 'reports', 'stock'],
 }
 
@@ -61,7 +63,8 @@ export default function OfficeScreen() {
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder,
     salaryPayouts, paySalary,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
-    cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason } = usePos()
+    cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
+    discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
@@ -98,6 +101,9 @@ export default function OfficeScreen() {
   const [newPt, setNewPt] = useState({ name: '', kind: 'cashless' as PaymentKind, code: '' })
   const [newCo, setNewCo] = useState({ name: '', direction: 'out' as 'in' | 'out', requireComment: false, limit: '' })
   const [newReason, setNewReason] = useState('')
+  // дисконтная система (раздел discount)
+  const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
+  const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
   // отчёты (раздел reports)
   const [report, setReport] = useState<'sales' | 'stock' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
@@ -471,6 +477,83 @@ export default function OfficeScreen() {
             <div className="flex items-end gap-2">
               <input value={newReason} onChange={(e) => setNewReason(e.target.value)} placeholder="Новая причина" className="h-9 rounded border border-gray-300 px-2 w-64" />
               <button onClick={() => { if (newReason.trim()) { addWriteoffReason(newReason); setNewReason('') } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm inline-flex items-center gap-1"><Plus size={14} />Добавить</button>
+            </div>
+          </div>
+        ) : section === 'discount' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Скидки/надбавки и клубные карты (Дисконтная система, iikoOffice). Касса применяет на экране заказа:
+              ручные — по праву F_ID, по карте — прокаткой номера. «Счастливый час» и «сумма не менее» проверяются автоматически.
+            </div>
+
+            {/* Скидки и надбавки */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Скидки и надбавки</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2">Название</th><th>Вид</th><th className="text-right">%</th><th className="text-center">Вручную</th><th className="text-center">По карте</th><th>Период</th><th className="text-right">От суммы</th><th className="p-2"></th>
+                </tr></thead>
+                <tbody>
+                  {discounts.map((d) => (
+                    <tr key={d.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2">{d.name}</td>
+                      <td><span className={`text-xs px-2 py-0.5 rounded-full ${d.kind === 'discount' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>{d.kind === 'discount' ? 'скидка' : 'надбавка'}</span></td>
+                      <td className="text-right font-medium">{d.percent}%</td>
+                      <td className="text-center"><input type="checkbox" checked={d.manual} onChange={(e) => updateDiscount(d.id, { manual: e.target.checked })} /></td>
+                      <td className="text-center"><input type="checkbox" checked={d.byCard} onChange={(e) => updateDiscount(d.id, { byCard: e.target.checked })} /></td>
+                      <td className="text-gray-500 text-xs">{d.fromTime ? `${d.fromTime}–${d.toTime}` : '—'}</td>
+                      <td className="text-right text-gray-500">{d.minSum ? formatTenge(d.minSum) : '—'}</td>
+                      <td className="p-2 text-right"><button onClick={() => removeDiscount(d.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-end gap-2 mb-6 bg-white border border-gray-200 rounded p-3">
+              <input value={newDisc.name} onChange={(e) => setNewDisc({ ...newDisc, name: e.target.value })} placeholder="Название" className="h-9 rounded border border-gray-300 px-2 flex-1 min-w-[160px]" />
+              <select value={newDisc.kind} onChange={(e) => setNewDisc({ ...newDisc, kind: e.target.value as 'discount' | 'surcharge' })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="discount">Скидка</option><option value="surcharge">Надбавка</option>
+              </select>
+              <input value={newDisc.percent} onChange={(e) => setNewDisc({ ...newDisc, percent: e.target.value.replace(/[^\d.]/g, '') })} placeholder="%" className="h-9 w-16 rounded border border-gray-300 px-2 text-right" />
+              <input value={newDisc.minSum} onChange={(e) => setNewDisc({ ...newDisc, minSum: e.target.value.replace(/\D/g, '') })} placeholder="от суммы" className="h-9 w-24 rounded border border-gray-300 px-2 text-right" />
+              <input value={newDisc.fromTime} onChange={(e) => setNewDisc({ ...newDisc, fromTime: e.target.value })} placeholder="с ЧЧ:ММ" className="h-9 w-20 rounded border border-gray-300 px-2" />
+              <input value={newDisc.toTime} onChange={(e) => setNewDisc({ ...newDisc, toTime: e.target.value })} placeholder="по ЧЧ:ММ" className="h-9 w-20 rounded border border-gray-300 px-2" />
+              <label className="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={newDisc.manual} onChange={(e) => setNewDisc({ ...newDisc, manual: e.target.checked })} />вручную</label>
+              <label className="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={newDisc.byCard} onChange={(e) => setNewDisc({ ...newDisc, byCard: e.target.checked })} />по карте</label>
+              <button onClick={() => {
+                const pct = parseFloat(newDisc.percent) || 0
+                if (!newDisc.name.trim() || pct <= 0) return
+                addDiscount({ name: newDisc.name.trim(), kind: newDisc.kind, percent: pct, manual: newDisc.manual, byCard: newDisc.byCard, auto: false, minSum: newDisc.minSum ? Number(newDisc.minSum) : undefined, fromTime: newDisc.fromTime || undefined, toTime: newDisc.toTime || undefined })
+                setNewDisc({ name: '', kind: 'discount', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
+              }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить</button>
+            </div>
+
+            {/* Клубные карты */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Клубные карты</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Номер</th><th>Владелец</th><th>Скидка</th><th className="p-2"></th></tr></thead>
+                <tbody>
+                  {clubCards.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Карт нет.</td></tr> : clubCards.map((c) => (
+                    <tr key={c.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2 font-mono">{c.number}</td>
+                      <td>{c.owner}</td>
+                      <td className="text-gray-600">{discounts.find((d) => d.id === c.discountId)?.name ?? '—'}</td>
+                      <td className="p-2 text-right"><button onClick={() => removeClubCard(c.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-end gap-2">
+              <input value={newCard.number} onChange={(e) => setNewCard({ ...newCard, number: e.target.value })} placeholder="Номер карты" className="h-9 rounded border border-gray-300 px-2 w-40" />
+              <input value={newCard.owner} onChange={(e) => setNewCard({ ...newCard, owner: e.target.value })} placeholder="Владелец" className="h-9 rounded border border-gray-300 px-2 flex-1" />
+              <select value={newCard.discountId} onChange={(e) => setNewCard({ ...newCard, discountId: e.target.value })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="">— скидка (по карте) —</option>
+                {discounts.filter((d) => d.byCard).map((d) => <option key={d.id} value={d.id}>{d.name} {d.percent}%</option>)}
+              </select>
+              <button onClick={() => { if (newCard.number.trim() && newCard.discountId) { addClubCard({ number: newCard.number.trim(), owner: newCard.owner.trim(), discountId: newCard.discountId }); setNewCard({ number: '', owner: '', discountId: '' }) } }}
+                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Выпустить карту</button>
             </div>
           </div>
         ) : section === 'staff' ? (

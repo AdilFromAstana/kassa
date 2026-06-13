@@ -113,6 +113,29 @@ export interface PaymentType {
   discountPct?: number   // авто-скидка при этом типе оплаты, %
 }
 
+// Скидка / надбавка (Дисконтная система → Скидки и надбавки, topic-503). У нас — в процентах (под модель заказа).
+export interface Discount {
+  id: string
+  name: string          // название в системе
+  chequeName?: string   // название на чеке
+  kind: 'discount' | 'surcharge'
+  percent: number
+  manual: boolean       // можно назначать вручную (право F_ID)
+  byCard: boolean       // можно назначать по клубной карте
+  auto: boolean         // устанавливать автоматически
+  minSum?: number       // применять, если сумма заказа не менее
+  fromTime?: string     // «счастливый час»: с (ЧЧ:ММ)
+  toTime?: string       // по (ЧЧ:ММ)
+}
+
+// Клубная (дисконтная) карта гостя (Дисконтная система → Клубные карты, topic-502).
+export interface ClubCard {
+  id: string
+  number: string
+  owner: string
+  discountId: string    // тип скидки (из скидок со способом «по карте»)
+}
+
 // Тип внесения/изъятия наличных (Розничные продажи → Типы внесений/изъятий, topic-102).
 export interface CashOpType {
   id: string

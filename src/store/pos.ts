@@ -2,11 +2,11 @@ import { create } from 'zustand'
 import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
-  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType,
+  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
-  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed } from '../mock/data'
+  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -116,6 +116,21 @@ function loadWriteoffReasons(): string[] {
 function persistWriteoffReasons(list: string[]) {
   try { localStorage.setItem('iiko-writeoff-reasons', JSON.stringify(list)) } catch { /* ignore */ }
 }
+// Дисконтная система (раздел 10): скидки/надбавки + клубные карты.
+function loadDiscounts(): Discount[] {
+  try { const raw = localStorage.getItem('iiko-discounts'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return discountSeed.map((d) => ({ ...d }))
+}
+function persistDiscounts(list: Discount[]) {
+  try { localStorage.setItem('iiko-discounts', JSON.stringify(list)) } catch { /* ignore */ }
+}
+function loadClubCards(): ClubCard[] {
+  try { const raw = localStorage.getItem('iiko-club-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return clubCardSeed.map((c) => ({ ...c }))
+}
+function persistClubCards(list: ClubCard[]) {
+  try { localStorage.setItem('iiko-club-cards', JSON.stringify(list)) } catch { /* ignore */ }
+}
 
 // ───────── мок-персист ОПЕРАТИВНОГО слоя (смена/заказы/банкеты/стоп-лист/документы/сообщения) ─────────
 // Без бэка: чтобы при перезагрузке страницы (F5) ничего не терялось. Конфиг офиса хранится отдельными ключами.
@@ -221,6 +236,8 @@ interface PosState {
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
+  discounts: Discount[]       // скидки/надбавки (Дисконтная система)
+  clubCards: ClubCard[]       // клубные (дисконтные) карты
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -299,6 +316,12 @@ interface PosState {
   removeCashOpType: (id: string) => void
   addWriteoffReason: (name: string) => void
   removeWriteoffReason: (name: string) => void
+  // дисконтная система (офис → касса)
+  addDiscount: (d: Omit<Discount, 'id'>) => void
+  updateDiscount: (id: string, patch: Partial<Discount>) => void
+  removeDiscount: (id: string) => void
+  addClubCard: (c: Omit<ClubCard, 'id'>) => void
+  removeClubCard: (id: string) => void
 
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
@@ -356,6 +379,8 @@ export const usePos = create<PosState>((set, get) => ({
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
+  discounts: loadDiscounts(),
+  clubCards: loadClubCards(),
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -846,6 +871,35 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.writeoffReasons.filter((r) => r !== name)
     persistWriteoffReasons(list)
     return { writeoffReasons: list }
+  }),
+
+  addDiscount: (d) => set((st) => {
+    const id = 'd-' + (st.discounts.length + 1) + '-' + Math.floor(d.percent)
+    const list = [...st.discounts, { ...d, id }]
+    persistDiscounts(list)
+    return { discounts: list }
+  }),
+  updateDiscount: (id, patch) => set((st) => {
+    const list = st.discounts.map((d) => (d.id === id ? { ...d, ...patch } : d))
+    persistDiscounts(list)
+    return { discounts: list }
+  }),
+  removeDiscount: (id) => set((st) => {
+    const list = st.discounts.filter((d) => d.id !== id)
+    persistDiscounts(list)
+    return { discounts: list }
+  }),
+  addClubCard: (c) => set((st) => {
+    if (!c.number.trim() || st.clubCards.some((x) => x.number === c.number)) return st
+    const id = 'card-' + (st.clubCards.length + 1)
+    const list = [...st.clubCards, { ...c, id }]
+    persistClubCards(list)
+    return { clubCards: list }
+  }),
+  removeClubCard: (id) => set((st) => {
+    const list = st.clubCards.filter((c) => c.id !== id)
+    persistClubCards(list)
+    return { clubCards: list }
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {

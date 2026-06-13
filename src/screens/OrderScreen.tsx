@@ -10,6 +10,7 @@ import ModifiersModal from '../components/ModifiersModal'
 import TransferModal from '../components/TransferModal'
 import SearchModal from '../components/SearchModal'
 import QuantityModal from '../components/QuantityModal'
+import DiscountModal from '../components/DiscountModal'
 import type { Dish, SelectedModifier } from '../types'
 
 // Рабочий экран заказа: гости — вкладками сверху (как в iikoFront). Блюда падают активному гостю.
@@ -28,6 +29,7 @@ export default function OrderScreen() {
   const [moveGuest, setMoveGuest] = useState(false)
   const [guestPay, setGuestPay] = useState(false)
   const [showMore, setShowMore] = useState(false)
+  const [showDiscount, setShowDiscount] = useState(false)
 
   useEffect(() => { if (!order) navigate('/halls') }, [order, navigate])
   // при переключении на другой заказ — сбросить активного гостя и выбор
@@ -55,14 +57,9 @@ export default function OrderScreen() {
   const [qtyOpen, setQtyOpen] = useState(false)
   const setQtyManual = () => { if (selUid) setQtyOpen(true) }
   const selLine = order.lines.find((l) => l.uid === selUid) ?? null
-  const setDiscount = () => {
-    const v = window.prompt('Скидка, % (0–100):', String(order.discountPct))
-    if (v != null) pos.setDiscount(Math.min(100, Math.max(0, parseFloat(v) || 0)))
-  }
-  const setSurcharge = () => {
-    const v = window.prompt('Надбавка, % (0–100):', String(order.surchargePct))
-    if (v != null) pos.setSurcharge(Math.min(100, Math.max(0, parseFloat(v) || 0)))
-  }
+  // скидка/надбавка — через модалку с офисными скидками + клубной картой (Дисконтная система)
+  const setDiscount = () => setShowDiscount(true)
+  const setSurcharge = () => setShowDiscount(true)
 
   // Сервисный чек на кухню/бар (марка/бегунок): весь заказ или выделенная позиция.
   // Роутинг по группе блюда → станция приготовления. Товары/услуги на станцию не печатаются.
@@ -267,6 +264,16 @@ export default function OrderScreen() {
       {modDish && <ModifiersModal dish={modDish} onConfirm={onModConfirm} onCancel={() => setModDish(null)} />}
       {showTransfer && <TransferModal orderId={order.id} onClose={() => setShowTransfer(false)} onMoved={() => { setShowTransfer(false); navigate('/halls') }} />}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} onPick={(d) => { setShowSearch(false); addDish(d) }} />}
+      {showDiscount && (
+        <DiscountModal
+          subtotal={orderSubtotal(order)}
+          discountPct={order.discountPct}
+          surchargePct={order.surchargePct}
+          onApplyDiscount={(pct) => pos.setDiscount(pct)}
+          onApplySurcharge={(pct) => pos.setSurcharge(pct)}
+          onClose={() => setShowDiscount(false)}
+        />
+      )}
 
       {/* перенести выбранную позицию другому гостю (ножницы) */}
       {moveGuest && selUid && (
