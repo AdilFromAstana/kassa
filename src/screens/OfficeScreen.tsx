@@ -78,7 +78,7 @@ export default function OfficeScreen() {
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
     techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
-    staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder,
+    staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder, applyDuePriceOrders,
     salaryPayouts, paySalary,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
@@ -365,9 +365,13 @@ export default function OfficeScreen() {
           </div>
         ) : section === 'prikazy' ? (
           <div className="p-6 max-w-4xl">
-            <div className="text-xs text-gray-500 mb-5">
-              Приказ об изменении цен (как в iikoOffice): набор новых цен + дата вступления в силу. <b>Активация</b> отправляет цены на кассу
-              (раздел «Меню и цены» и цены новых позиций в заказе обновляются сразу).
+            <div className="flex items-start gap-3 mb-5">
+              <div className="text-xs text-gray-500 flex-1">
+                Приказ об изменении цен (как в iikoOffice): набор новых цен + дата вступления в силу. <b>Активация</b> отправляет цены на кассу.
+                Приказы с наступившей датой вступления <b>применяются автоматически</b> при запуске; будущие — ждут своей даты.
+              </div>
+              <button onClick={() => { const n = applyDuePriceOrders(); printToast(n > 0 ? `Применено приказов по дате: ${n}` : 'Приказов к применению нет') }}
+                className="h-9 px-3 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-100 shrink-0">Применить по дате</button>
             </div>
 
             {/* конструктор приказа */}
@@ -414,7 +418,10 @@ export default function OfficeScreen() {
                     <span className="text-sm text-gray-500">с {formatRu(o.date)} · {o.note}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${o.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{o.status === 'active' ? 'действует' : 'черновик'}</span>
                     {o.status === 'draft'
-                      ? <button onClick={() => { activatePriceOrder(o.id); printToast(`Приказ ${o.no} активирован — цены на кассе обновлены`) }} className="ml-auto h-8 px-3 rounded bg-blue-600 text-white text-xs">Активировать</button>
+                      ? <span className="ml-auto flex items-center gap-2">
+                          {o.date > todayISO() && <span className="text-xs text-gray-400">авто с {formatRu(o.date)}</span>}
+                          <button onClick={() => { activatePriceOrder(o.id); printToast(`Приказ ${o.no} активирован — цены на кассе обновлены`) }} className="h-8 px-3 rounded bg-blue-600 text-white text-xs">Активировать сейчас</button>
+                        </span>
                       : <span className="ml-auto text-emerald-600 text-xs inline-flex items-center gap-1"><Check size={13} />цены на кассе</span>}
                   </div>
                   <table className="w-full text-sm">

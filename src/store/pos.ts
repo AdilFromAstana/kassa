@@ -9,6 +9,7 @@ import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
+import { todayISO } from '../lib/date'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
@@ -350,6 +351,7 @@ interface PosState {
   // прейскурант (приказы об изменении цен → активация уезжает на кассу)
   createPriceOrder: (lines: PriceOrderLine[], date: string, note: string) => PriceOrder | null
   activatePriceOrder: (id: number) => void
+  applyDuePriceOrders: () => number // авто-применение приказов, у которых дата вступления ≤ сегодня
 
   // зарплата: выдача аванса/расчёта → изъятие наличных из кассы (связь офис↔касса)
   paySalary: (staffId: string, kind: 'advance' | 'settlement', amount: number) => void
@@ -930,6 +932,21 @@ export const usePos = create<PosState>((set, get) => ({
     persistPriceOrders(list)
     return { priceOverrides: prices, priceOrders: list }
   }),
+  applyDuePriceOrders: () => {
+    const today = todayISO()
+    const due = get().priceOrders.filter((o) => o.status === 'draft' && o.date <= today)
+    if (due.length === 0) return 0
+    // применяем в хронологическом порядке (поздние приказы перекрывают ранние)
+    const ordered = [...due].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
+    const prices = { ...get().priceOverrides }
+    for (const o of ordered) for (const l of o.lines) prices[l.dishId] = l.newPrice
+    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(prices)) } catch { /* ignore */ }
+    const dueIds = new Set(ordered.map((o) => o.id))
+    const list = get().priceOrders.map((o) => (dueIds.has(o.id) ? { ...o, status: 'active' as const } : o))
+    persistPriceOrders(list)
+    set({ priceOverrides: prices, priceOrders: list })
+    return ordered.length
+  },
 
   // Выдача аванса/расчёта сотруднику. Фактическая выдача = изъятие наличных из кассы
   // (тип содержит «зарплат» → попадает в отчёт 038 и пересчёт смены). Ведомость персистится отдельно.
@@ -1114,6 +1131,9 @@ export const usePos = create<PosState>((set, get) => ({
     set({ demoAuto: on })
   },
 }))
+
+// Авто-применение приказов об изменении цен, у которых дата вступления уже наступила (Прейскурант, topic-811).
+usePos.getState().applyDuePriceOrders()
 
 // Автосохранение оперативного слоя при любом изменении (мок-персист без бэка → ничего не теряется на reload).
 usePos.subscribe((s) => persistRuntime(s as unknown as Record<string, unknown>))
