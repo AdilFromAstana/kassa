@@ -3,7 +3,8 @@ import BackButton from '../components/BackButton'
 import { useNavigate } from 'react-router-dom'
 import { usePos, lineTotal } from '../store/pos'
 import { formatTenge, vatAmount } from '../lib/money'
-import { printToast } from '../lib/print'
+import { printToast, toast } from '../lib/print'
+import ReportParamsModal from '../components/ReportParamsModal'
 import { attendance } from '../mock/data'
 import { dishCost } from '../mock/warehouse'
 import TopBar from '../components/TopBar'
@@ -12,11 +13,47 @@ import type { ClosedOrder } from '../types'
 // Отчёты на кассе (FRONT_03 §5.1) — полный список iikoFront по разделам.
 // Все цифры считаются из закрытых заказов смены, движений наличных, возвратов, списаний и явок.
 interface Rep { id: string; name: string }
-const SECTIONS: { title: string; reports: Rep[] }[] = [
+// Список 1:1 с iikoFront: секции по первой паре цифр номера, порядок
+// 01 Выручка → 02 Расход блюд → 03 Специальные → 04 Касса (в конце).
+// Источники: реальные скрины экрана «Отчёты» + iikoFront API (номера/названия 015/033/039/050/052/053/054).
+const SECTIONS: { title: string; noParams?: boolean; reports: Rep[] }[] = [
   {
-    title: 'Отчёты по кассе (терминал, текущая смена)',
+    title: '01 Отчёты по выручке',
     reports: [
-      { id: 'x', name: 'X-отчёт (без гашения)' },
+      { id: '011', name: '011 Общая выручка по типам с налогами' },
+      { id: '012', name: '012 Общая выручка почасовая' },
+      { id: '013', name: '013 Общая выручка по официантам' },
+      { id: '015', name: '015 Краткий отчёт по открытым заказам и продажам в разрезе залов' },
+      { id: '016', name: '016 Чеки по типам оплаты' },
+    ],
+  },
+  {
+    title: '02 Отчёты по расходу блюд',
+    reports: [
+      { id: '021', name: '021 Общий расход блюд' },
+      { id: '023', name: '023 Общие продажи блюд' },
+      { id: '024', name: '024 Общие списания блюд' },
+    ],
+  },
+  {
+    title: '03 Специальные отчёты',
+    reports: [
+      { id: '031', name: '031 Сводный отчёт' },
+      { id: '032', name: '032 Питание персонала' },
+      { id: '033', name: '033 Время от пречека до оплаты' },
+      { id: '034', name: '034 Списания блюд' },
+      { id: '035', name: '035 Явки сотрудников' },
+      { id: '036', name: '036 Отчёт по скидкам и надбавкам' },
+      { id: '037', name: '037 Опасные операции' },
+      { id: '038', name: '038 Расчёт сотрудникам' },
+      { id: '039', name: '039 Отчёт по вскрытиям тары' },
+    ],
+  },
+  {
+    // Отчёты по текущему терминалу/кассовой смене — привязаны к смене, без окна «Параметры».
+    title: '04 Отчёты по кассе',
+    noParams: true,
+    reports: [
       { id: '041', name: '041 Выручка по типам с налогами' },
       { id: '042', name: '042 Выручка почасовая' },
       { id: '043', name: '043 Продажи блюд' },
@@ -26,41 +63,18 @@ const SECTIONS: { title: string; reports: Rep[] }[] = [
       { id: '047', name: '047 Чеки по типам оплаты за смену' },
       { id: '048', name: '048 Итого по смене' },
       { id: '049', name: '049 Кассовая лента' },
+      { id: '050', name: '050 Отчёт по доставкам' },
       { id: '051', name: '051 Расширенный реестр счетов' },
-      { id: '052', name: '052 По внесениям и изъятиям' },
-      { id: '054', name: '054 По чаевым' },
-    ],
-  },
-  {
-    title: 'Отчёты по выручке (все терминалы, операц. день)',
-    reports: [
-      { id: '011', name: '011 Общая выручка по типам с налогами' },
-      { id: '012', name: '012 Общая выручка почасовая' },
-      { id: '013', name: '013 Общая выручка по официантам' },
-      { id: '016', name: '016 Чеки по типам оплаты' },
-    ],
-  },
-  {
-    title: 'Отчёты по расходу блюд',
-    reports: [
-      { id: '021', name: '021 Общий расход' },
-      { id: '023', name: '023 Общие продажи' },
-      { id: '024', name: '024 Общие списания' },
-    ],
-  },
-  {
-    title: 'Специальные',
-    reports: [
-      { id: '031', name: '031 Сводный' },
-      { id: '032', name: '032 Питание персонала' },
-      { id: '034', name: '034 Списания блюд' },
-      { id: '035', name: '035 Явки' },
-      { id: '036', name: '036 Скидки/надбавки' },
-      { id: '037', name: '037 Опасные операции' },
-      { id: '038', name: '038 Расчёт сотрудникам' },
+      { id: '052', name: '052 Отчёт по внесениям и изъятиям' },
+      { id: '053', name: '053 Блюда для приготовления доставок' },
+      { id: '054', name: '054 Отчёт по чаевым' },
     ],
   },
 ]
+
+// «Параметры» (период) активны для отчётов 01–03 (выручка/расход/специальные).
+// Отчёты по кассе (04, noParams) привязаны к текущей смене → кнопка неактивна (как в оригинале).
+const NO_PARAM_IDS = new Set(SECTIONS.filter((s) => s.noParams).flatMap((s) => s.reports).map((r) => r.id))
 
 const hourOf = (o: ClosedOrder) => (o.paidAt.split(',')[1]?.trim() ?? '').slice(0, 2) || '—'
 const timeOf = (o: ClosedOrder) => (o.paidAt.split(',')[1]?.trim() ?? o.paidAt).slice(0, 5)
@@ -69,7 +83,11 @@ const tableLabel = (o: ClosedOrder) => (o.tableId ? `стол ${o.tableId.replac
 export default function ReportsScreen() {
   const navigate = useNavigate()
   const { closedOrders, cashShift, cashMovements, refunds, writeOffs, ingredients } = usePos()
-  const [sel, setSel] = useState('x')
+  const [sel, setSel] = useState('011')
+  const [showParams, setShowParams] = useState(false)
+  const [period, setPeriod] = useState(() => { const d = new Date(); return { from: d, to: d } })
+  const hasParams = !NO_PARAM_IDS.has(sel)
+  const fmtShort = (d: Date) => d.toLocaleDateString('ru-RU')
 
   // ───────────────────────── агрегаты смены ─────────────────────────
   const count = closedOrders.length
@@ -360,15 +378,40 @@ export default function ReportsScreen() {
             </div>
             {body()}
             <div className="text-center text-xs text-gray-400 mt-3 border-t pt-2">
-              {sel === 'x' ? 'X-отчёт — без гашения счётчика' : 'Отчёт за текущую кассовую смену'}
+              {hasParams ? `Отчёт за период ${fmtShort(period.from)} — ${fmtShort(period.to)}` : 'Отчёт за текущую кассовую смену'}
             </div>
           </div>
         </div>
       </div>
-      <div className="h-16 bg-white text-gray-700 flex items-center px-4 gap-4">
+      <div className="h-16 bg-white text-gray-700 flex items-center px-4 gap-3">
         <BackButton onClick={() => navigate('/menu')} />
-        <button onClick={() => printToast(`Отчёт «${repName}» распечатан`)} className="ml-auto h-12 px-8 rounded-md bg-pos-blue text-white">Печать</button>
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            disabled={!hasParams}
+            onClick={() => setShowParams(true)}
+            title={hasParams ? 'Параметры отчёта' : 'У этого отчёта нет настраиваемых параметров'}
+            className="h-12 px-6 rounded-md border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
+          >
+            Параметры
+          </button>
+          <button onClick={() => toast(`Отчёт «${repName}» обновлён`)} className="h-12 px-6 rounded-md border border-gray-300 hover:bg-gray-100">Обновить</button>
+          <button onClick={() => printToast(`Отчёт «${repName}» распечатан`)} className="h-12 px-8 rounded-md bg-pos-blue text-white">Печать</button>
+        </div>
       </div>
+
+      {showParams && hasParams && (
+        <ReportParamsModal
+          title={repName}
+          from={period.from}
+          to={period.to}
+          onOk={(from, to) => {
+            setPeriod({ from, to })
+            setShowParams(false)
+            toast(`Отчёт «${repName}» сформирован за период\n${fmtShort(from)} — ${fmtShort(to)}`)
+          }}
+          onCancel={() => setShowParams(false)}
+        />
+      )}
     </div>
   )
 }

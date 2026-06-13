@@ -51,6 +51,13 @@ export interface TechCardItem {
   gross: number        // норма закладки, брутто, в ед. ингредиента
 }
 
+export interface StopItem {
+  dishId: string
+  remaining?: number   // остаток порций; undefined = полный стоп (недоступно). >0 — продаётся, тает, при 0 → стоп
+  byName: string       // кто внёс
+  at: string           // когда (дата-время)
+}
+
 export interface MenuGroup {
   id: string
   name: string
@@ -196,8 +203,10 @@ export interface Refund {
   amount: number
   full: boolean
   lineUids: string[] // какие позиции вернули (для частичного)
+  reason: string     // причина возврата
+  restock: boolean   // вернуть товар на склад (возврат со списанием на склад)
   at: string
-  by: string
+  by: string         // кто авторизовал (право F_STRN / F_SWWOFF)
 }
 
 export type BanquetType = 'Банкет' | 'Резерв'

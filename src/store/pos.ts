@@ -1,12 +1,28 @@
 import { create } from 'zustand'
 import type {
-  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift,
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { findStaffByPin, initialBanquets } from '../mock/data'
-import { baseIngredients, applyWriteoff } from '../mock/warehouse'
+import { hasRight } from '../lib/rights'
+
+// Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
+// Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
+export const isStopped = (stopList: StopItem[], dishId: string) =>
+  stopList.some((s) => s.dishId === dishId && (s.remaining === undefined || s.remaining <= 0))
+
+// Уменьшение остатка стоп-листа на проданные позиции (вызывается при оплате).
+const applyStopDecrement = (stopList: StopItem[], lines: OrderLine[]): StopItem[] => {
+  const sold: Record<string, number> = {}
+  for (const l of lines) sold[l.dishId] = (sold[l.dishId] ?? 0) + l.qty
+  return stopList.map((s) =>
+    s.remaining !== undefined && sold[s.dishId]
+      ? { ...s, remaining: Math.max(0, +(s.remaining - sold[s.dishId]).toFixed(3)) }
+      : s)
+}
+import { baseIngredients, applyWriteoff, applyRestock } from '../mock/warehouse'
 import { buildDemo } from '../mock/demo'
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -86,7 +102,7 @@ interface PosState {
   writeOffs: WriteOff[] // акты списания блюд (для отчётов 024/034/037)
   banquets: Banquet[]
   closedShifts: ClosedShift[] // архив закрытых кассовых смен
-  stopList: string[] // dishId, снятые с продажи (стоп-лист)
+  stopList: StopItem[] // стоп-лист: dishId + остаток порций + кто/когда внёс
   ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
@@ -121,13 +137,16 @@ interface PosState {
 
   // деньги, возвраты, перенос, банкеты
   addCashMovement: (kind: 'in' | 'out', type: string, amount: number, comment: string) => void
-  refundOrder: (receiptNo: string, lineUids: string[] | 'all') => Refund | null
+  refundOrder: (receiptNo: string, lineUids: string[] | 'all', opts: { reason: string; restock: boolean; by: string }) => Refund | null
   changePaymentType: (receiptNo: string, payments: PaymentSplit[]) => void
   moveOrderToTable: (orderId: number, tableId: string, hallId: string) => void
   mergeOrderInto: (sourceId: number, targetId: number) => void
   addBanquet: (b: Omit<Banquet, 'id' | 'status'>) => void
   setBanquetStatus: (id: number, status: BanquetStatus) => void
-  toggleStop: (dishId: string) => void
+  addStop: (dishId: string, remaining?: number) => void
+  removeStop: (dishId: string) => void
+  setStopRemaining: (dishId: string, remaining: number) => void
+  can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
   setEstablishment: (patch: Partial<Establishment>) => void
 
   // склад
@@ -301,6 +320,7 @@ export const usePos = create<PosState>((set, get) => ({
         currentOrderId: null,
         fiscalSeq: st.fiscalSeq + 1,
         ingredients,
+        stopList: applyStopDecrement(st.stopList, o.lines), // уменьшить остаток стоп-листа
       }
     })
     return closed
@@ -327,6 +347,8 @@ export const usePos = create<PosState>((set, get) => ({
         closedOrders: [closed, ...st.closedOrders],
         fiscalSeq: st.fiscalSeq + 1,
         ingredients,
+        stopList: applyStopDecrement(st.stopList, mine), // уменьшить остаток стоп-листа
+
         // оставшиеся гости — в заказе; если никого не осталось, заказ закрыт
         orders: rest.length === 0
           ? st.orders.filter((x) => x.id !== o.id)
@@ -346,28 +368,44 @@ export const usePos = create<PosState>((set, get) => ({
       movementSeq: st.movementSeq + 1,
     })),
 
-  refundOrder: (receiptNo, lineUids) => {
-    const closed = get().closedOrders.find((o) => o.fiscalDocNo === receiptNo)
+  refundOrder: (receiptNo, lineUids, opts) => {
+    let closed = get().closedOrders.find((o) => o.fiscalDocNo === receiptNo)
+    if (!closed) { // искать в архиве закрытых кассовых смен
+      for (const sh of get().closedShifts) {
+        const f = sh.orders.find((o) => o.fiscalDocNo === receiptNo)
+        if (f) { closed = f; break }
+      }
+    }
     if (!closed) return null
     const full = lineUids === 'all'
     const uids = full ? closed.lines.map((l) => l.uid) : lineUids
+    const returnedLines = closed.lines.filter((l) => uids.includes(l.uid))
     const amount = full
       ? closed.total
-      : closed.lines.filter((l) => uids.includes(l.uid)).reduce((s, l) => s + lineTotal(l), 0)
+      : returnedLines.reduce((s, l) => s + lineTotal(l), 0)
     const refund: Refund = {
       id: get().refundSeq + 1,
       orderId: closed.id,
       fiscalDocNo: String(get().fiscalSeq + 1),
-      amount, full, lineUids: uids, at: fullNow(), by: get().user?.name ?? '',
+      amount, full, lineUids: uids,
+      reason: opts.reason, restock: opts.restock,
+      at: fullNow(), by: opts.by,
     }
-    set((st) => ({
-      refunds: [refund, ...st.refunds],
-      refundSeq: st.refundSeq + 1,
-      fiscalSeq: st.fiscalSeq + 1,
-      // в моке уменьшаем сумму чека на возвращённое (полный возврат → 0)
-      closedOrders: st.closedOrders.map((o) =>
-        o.fiscalDocNo === receiptNo ? { ...o, total: full ? 0 : +(o.total - amount).toFixed(2) } : o),
-    }))
+    set((st) => {
+      // «со списанием на склад» — возвращаем ингредиенты возвращённых позиций в остаток
+      const ingredients = opts.restock ? applyRestock(st.ingredients, returnedLines) : st.ingredients
+      if (opts.restock) persistIngredients(ingredients)
+      // в моке уменьшаем сумму чека на возвращённое (полный возврат → 0) — и в текущих, и в архиве
+      const upd = (o: ClosedOrder) => o.fiscalDocNo === receiptNo ? { ...o, total: full ? 0 : +(o.total - amount).toFixed(2) } : o
+      return {
+        refunds: [refund, ...st.refunds],
+        refundSeq: st.refundSeq + 1,
+        fiscalSeq: st.fiscalSeq + 1,
+        ingredients,
+        closedOrders: st.closedOrders.map(upd),
+        closedShifts: st.closedShifts.map((sh) => ({ ...sh, orders: sh.orders.map(upd) })),
+      }
+    })
     return refund
   },
 
@@ -403,12 +441,15 @@ export const usePos = create<PosState>((set, get) => ({
   setBanquetStatus: (id, status) =>
     set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, status } : b)) })),
 
-  toggleStop: (dishId) =>
-    set((st) => ({
-      stopList: st.stopList.includes(dishId)
-        ? st.stopList.filter((d) => d !== dishId)
-        : [...st.stopList, dishId],
-    })),
+  addStop: (dishId, remaining) =>
+    set((st) => (st.stopList.some((s) => s.dishId === dishId)
+      ? st
+      : { stopList: [...st.stopList, { dishId, remaining, byName: st.user?.name ?? '—', at: fullNow() }] })),
+  removeStop: (dishId) =>
+    set((st) => ({ stopList: st.stopList.filter((s) => s.dishId !== dishId) })),
+  setStopRemaining: (dishId, remaining) =>
+    set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
+  can: (code) => hasRight(get().user?.positions, code),
 
   setEstablishment: (patch) => set((st) => {
     const next = { ...st.establishment, ...patch }

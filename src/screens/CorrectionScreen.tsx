@@ -40,6 +40,9 @@ export default function CorrectionScreen() {
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
       <TopBar title="Чек коррекции" />
+      <div className="bg-white/5 text-white/50 text-xs px-6 py-2">
+        Фискальная коррекция сумм для налоговой (KZ, Webkassa). Это <b>не возврат гостю</b> — для возврата оплаты используйте «Возврат товаров» → закрытые заказы / архив смен.
+      </div>
       <div className="flex-1 overflow-auto p-6">
         <div className="grid grid-cols-2 gap-4 max-w-3xl">
           {field('Признак расчёта', <select className={selCls} value={sign} onChange={(e) => setSign(e.target.value)}>{signs.map((s) => <option key={s}>{s}</option>)}</select>)}

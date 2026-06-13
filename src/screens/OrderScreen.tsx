@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, Search, Home, X, MoreVertical, Scissors, Plus, Receipt, ReceiptText, Users, Menu, Lock, UserRound, Calculator, Power } from 'lucide-react'
-import { usePos, lineTotal, orderSubtotal, orderTotal } from '../store/pos'
+import { ChevronLeft, Search, Home, X, MoreVertical, Scissors, Plus, Receipt, ReceiptText, Users, Menu, Lock, UserRound, Calculator, Power, Printer } from 'lucide-react'
+import { usePos, lineTotal, orderSubtotal, orderTotal, isStopped } from '../store/pos'
 import { groupsByPage, dishesByGroup, findDish } from '../mock/menu'
 import { dishMaxPortions } from '../mock/warehouse'
 import { formatTenge } from '../lib/money'
@@ -62,6 +62,26 @@ export default function OrderScreen() {
   const setSurcharge = () => {
     const v = window.prompt('Надбавка, % (0–100):', String(order.surchargePct))
     if (v != null) pos.setSurcharge(Math.min(100, Math.max(0, parseFloat(v) || 0)))
+  }
+
+  // Сервисный чек на кухню/бар (марка/бегунок): весь заказ или выделенная позиция.
+  // Роутинг по группе блюда → станция приготовления. Товары/услуги на станцию не печатаются.
+  const stationOf = (groupId?: string) => {
+    if (groupId && ['g-hot', 'g-nat', 'g-dessert'].includes(groupId)) return 'КУХНЯ'
+    if (groupId && ['g-drink', 'g-coffee', 'g-bar'].includes(groupId)) return 'БАР'
+    return null
+  }
+  const printService = () => {
+    const src = selUid ? order.lines.filter((l) => l.uid === selUid) : order.lines
+    const byStation: Record<string, string[]> = {}
+    for (const l of src) {
+      const st = stationOf(findDish(l.dishId)?.groupId)
+      if (!st) continue
+      ;(byStation[st] ??= []).push(`${l.qty}× ${l.name}`)
+    }
+    const parts = Object.entries(byStation).map(([st, items]) => `${st}:\n${items.join('\n')}`)
+    if (!parts.length) { printToast('Нет позиций для кухни/бара'); return }
+    printToast(`Сервисный чек${selUid ? ' (выделенное)' : ''} · ${tableLabel}\n${parts.join('\n\n')}`)
   }
 
   const est = pos.establishment
@@ -166,7 +186,7 @@ export default function OrderScreen() {
                     <button key={g.id} className="tile tile-group" onClick={() => setGroupId(g.id)}>{g.name}</button>
                   ))
                 : dishesByGroup(groupId).map((d) => {
-                    const manualStop = pos.stopList.includes(d.id)
+                    const manualStop = isStopped(pos.stopList, d.id)
                     const max = dishMaxPortions(d.id, pos.ingredients) // ∞ — без техкарты
                     const outOfStock = max <= 0
                     const stopped = manualStop || outOfStock
@@ -197,6 +217,10 @@ export default function OrderScreen() {
           <button onClick={newOrder} title="Новый заказ (быстрый чек)"
             className="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20"><Plus size={22} /></button>
         </div>
+
+        {/* Печать сервисного чека на кухню/бар (весь заказ или выделенное) */}
+        <button onClick={printService} disabled={order.lines.length === 0}
+          className="flex flex-col items-center gap-0.5 text-[11px] disabled:opacity-30"><Printer size={20} />ПЕЧАТЬ</button>
 
         {/* Пречек — ресторан + включена печать пречека в профиле (в фастфуде его нет) */}
         {isRest && est.precheck && (

@@ -15,3 +15,14 @@ export function printToast(text: string) {
   setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s' }, 1500)
   setTimeout(() => el.remove(), 1900)
 }
+
+// Обычный информационный тост (без иконки принтера) — для «Обновить», «Параметры применены» и т.п.
+export function toast(text: string) {
+  const el = document.createElement('div')
+  el.textContent = text
+  el.className =
+    'fixed bottom-6 left-1/2 -translate-x-1/2 bg-black/85 text-white px-5 py-3 rounded-lg z-50 text-sm shadow-lg whitespace-pre-line text-center'
+  document.body.appendChild(el)
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s' }, 1500)
+  setTimeout(() => el.remove(), 1900)
+}

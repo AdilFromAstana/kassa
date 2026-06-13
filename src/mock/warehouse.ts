@@ -3,7 +3,7 @@ import type { Ingredient, TechCardItem, OrderLine } from '../types'
 // Складская модель iiko (iikoOperation), упрощённая, но по официальной схеме:
 //  • на складе лежат ТОВАРЫ-ингредиенты с остатком и себестоимостью за ед. (не готовые блюда);
 //  • у блюда есть ТЕХКАРТА (ТТК) — норма закладки (брутто) ингредиентов на 1 порцию;
-//  • при продаже списываются ингредиенты по техкарте → остаток падает (аналог «Акта реализации»);
+//  • при продаже списываются ингредиенты по техкарте блюда И его модификаторов → остаток падает (аналог «Акта реализации»);
 //  • себестоимость блюда = Σ (брутто × себестоимость ингредиента) — поле «*» в номенклатуре.
 // См. ../../iiko_spec/04_tovary_i_sklady.md.
 
@@ -39,13 +39,21 @@ export const baseIngredients: Ingredient[] = [
   // Розница
   { id: 'i-bag',     code: 'T5001', name: 'Пакет',                unit: 'шт', stock: 300, costPerUnit: 20,    min: 50 },
   { id: 'i-mug',     code: 'T5002', name: 'Кружка с логотипом',   unit: 'шт', stock: 24,  costPerUnit: 1500,  min: 5 },
+  // Под модификаторы (гарниры / альт. молоко / сиропы)
+  { id: 'i-buckwheat', code: 'T2008', name: 'Гречка',                unit: 'кг', stock: 15, costPerUnit: 500,  min: 3 },
+  { id: 'i-milkLF',    code: 'T3007', name: 'Молоко безлактозное',   unit: 'л',  stock: 8,  costPerUnit: 700,  min: 2 },
+  { id: 'i-milkCoco',  code: 'T3008', name: 'Молоко кокосовое',      unit: 'л',  stock: 6,  costPerUnit: 1100, min: 1 },
+  { id: 'i-syrCaramel',code: 'T4006', name: 'Сироп карамельный',     unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1 },
+  { id: 'i-syrVanilla',code: 'T4007', name: 'Сироп ванильный',       unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1 },
+  { id: 'i-syrNut',    code: 'T4008', name: 'Сироп ореховый',        unit: 'л',  stock: 3,  costPerUnit: 2600, min: 1 },
 ]
 
 // ───────────────────────── Техкарты (ТТК) ─────────────────────────
 // dishId → норма закладки (брутто) на 1 порцию. Блюда без техкарты (услуги) не списывают склад.
 export const techCards: Record<string, TechCardItem[]> = {
   // Горячее
-  'd-rulka':  [{ ingredientId: 'i-lamb', gross: 0.5 }, { ingredientId: 'i-potato', gross: 0.2 }, { ingredientId: 'i-oil', gross: 0.03 }],
+  // гарнир — отдельным модификатором (m-garnir, обязателен), поэтому в базе картофеля нет
+  'd-rulka':  [{ ingredientId: 'i-lamb', gross: 0.5 }, { ingredientId: 'i-oil', gross: 0.03 }],
   'd-steak':  [{ ingredientId: 'i-ribeye', gross: 0.3 }, { ingredientId: 'i-butter', gross: 0.02 }, { ingredientId: 'i-oil', gross: 0.02 }],
   'd-cutlet': [{ ingredientId: 'i-chicken', gross: 0.25 }, { ingredientId: 'i-butter', gross: 0.03 }, { ingredientId: 'i-flour', gross: 0.05 }, { ingredientId: 'i-egg', gross: 1 }],
   // Национальное
@@ -59,7 +67,7 @@ export const techCards: Record<string, TechCardItem[]> = {
   'd-juice':  [{ ingredientId: 'i-orange', gross: 0.4 }],
   // Кофейня
   'd-cappu':  [{ ingredientId: 'i-coffee', gross: 0.018 }, { ingredientId: 'i-milk', gross: 0.15 }],
-  'd-latte':  [{ ingredientId: 'i-coffee', gross: 0.018 }, { ingredientId: 'i-milk', gross: 0.2 }],
+  'd-latte':  [{ ingredientId: 'i-coffee', gross: 0.018 }, { ingredientId: 'i-milk', gross: 0.15 }],
   'd-esp':    [{ ingredientId: 'i-coffee', gross: 0.009 }],
   // Бар
   'd-beer':   [{ ingredientId: 'i-beerkeg', gross: 0.5 }],
@@ -71,6 +79,26 @@ export const techCards: Record<string, TechCardItem[]> = {
   'd-pack':   [{ ingredientId: 'i-bag', gross: 1 }],
   'd-merch':  [{ ingredientId: 'i-mug', gross: 1 }],
   // Услуги (d-deliv, d-cork) — без техкарты, склад не трогают.
+}
+
+// ─────────────────── Техкарты модификаторов ───────────────────
+// optionId модификатора → норма расхода на 1 выбор. Списываются дополнительно к блюду.
+// • Гарниры/сиропы — добавочный расход.
+// • Альт. молоко — замена: возвращаем обычное молоко (−) и списываем альтернативное (+),
+//   чтобы не было двойного счёта с базовой техкартой кофе.
+export const modifierTechCards: Record<string, TechCardItem[]> = {
+  // Гарнир (m-garnir)
+  'mo-rice':      [{ ingredientId: 'i-rice', gross: 0.15 }],
+  'mo-buckwheat': [{ ingredientId: 'i-buckwheat', gross: 0.15 }],
+  'mo-potato':    [{ ingredientId: 'i-potato', gross: 0.15 }, { ingredientId: 'i-oil', gross: 0.04 }],
+  // Молоко (m-coffee-milk): обычное = базовое (без расхода), альтернативы — замена
+  'mo-lactfree':  [{ ingredientId: 'i-milk', gross: -0.15 }, { ingredientId: 'i-milkLF', gross: 0.15 }],
+  'mo-coconut':   [{ ingredientId: 'i-milk', gross: -0.15 }, { ingredientId: 'i-milkCoco', gross: 0.15 }],
+  // Сироп (m-syrup) — добавочный расход
+  'mo-caramel':   [{ ingredientId: 'i-syrCaramel', gross: 0.02 }],
+  'mo-vanilla':   [{ ingredientId: 'i-syrVanilla', gross: 0.02 }],
+  'mo-nut':       [{ ingredientId: 'i-syrNut', gross: 0.02 }],
+  // mo-regular (обычное молоко) — уже в базовой техкарте, отдельно не списывается.
 }
 
 // ───────────────────────── Расчёты ─────────────────────────
@@ -103,14 +131,31 @@ export function dishMaxPortions(dishId: string, ings: Ingredient[]): number {
 }
 
 // Списание ингредиентов по строкам заказа (аналог Акта реализации). Возвращает новый массив остатков.
-export function applyWriteoff(ings: Ingredient[], lines: OrderLine[]): Ingredient[] {
+// Списывается и блюдо (по техкарте), и его модификаторы (гарнир/молоко/сироп — по modifierTechCards),
+// норма модификатора умножается на его количество и на количество блюда.
+// Дельта расхода ингредиентов по строкам (блюдо по техкарте + модификаторы,
+// норма модификатора × его количество × количество блюда).
+function consumptionDelta(lines: OrderLine[]): Record<string, number> {
   const delta: Record<string, number> = {}
+  const add = (id: string, g: number) => { delta[id] = +((delta[id] ?? 0) + g).toFixed(4) }
   for (const l of lines) {
-    const card = techCards[l.dishId]
-    if (!card) continue
-    for (const it of card) delta[it.ingredientId] = (delta[it.ingredientId] ?? 0) + it.gross * l.qty
+    for (const it of techCards[l.dishId] ?? []) add(it.ingredientId, it.gross * l.qty)
+    for (const m of l.modifiers) {
+      for (const it of modifierTechCards[m.optionId] ?? []) add(it.ingredientId, it.gross * (m.qty || 1) * l.qty)
+    }
   }
+  return delta
+}
+
+export function applyWriteoff(ings: Ingredient[], lines: OrderLine[]): Ingredient[] {
+  const delta = consumptionDelta(lines)
   return ings.map((i) => (delta[i.id] ? { ...i, stock: +(i.stock - delta[i.id]).toFixed(3) } : i))
+}
+
+// Возврат ингредиентов на склад («возврат со списанием на склад» — товар вернулся в остаток).
+export function applyRestock(ings: Ingredient[], lines: OrderLine[]): Ingredient[] {
+  const delta = consumptionDelta(lines)
+  return ings.map((i) => (delta[i.id] ? { ...i, stock: +(i.stock + delta[i.id]).toFixed(3) } : i))
 }
 
 export const findIngredient = (id: string, ings: Ingredient[]) => ings.find((i) => i.id === id)

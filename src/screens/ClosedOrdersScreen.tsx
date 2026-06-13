@@ -6,14 +6,16 @@ import { paymentTypes } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
 import TopBar from '../components/TopBar'
+import RefundModal from '../components/RefundModal'
 
 // Закрытые заказы + возвраты (частичный/полный) и изменение типа оплаты (FRONT_03 §2.6).
 export default function ClosedOrdersScreen() {
   const navigate = useNavigate()
-  const { closedOrders, refunds, refundOrder, changePaymentType } = usePos()
+  const { closedOrders, refunds, refundOrder, changePaymentType, cashShift } = usePos()
   const [selNo, setSelNo] = useState<string | null>(closedOrders[0]?.fiscalDocNo ?? null)
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [changing, setChanging] = useState(false)
+  const [refundReq, setRefundReq] = useState<{ uids: string[] | 'all'; amount: number; title: string } | null>(null)
 
   const order = closedOrders.find((o) => o.fiscalDocNo === selNo) ?? null
   const orderRefunds = order ? refunds.filter((r) => r.orderId === order.id) : []
@@ -22,14 +24,20 @@ export default function ClosedOrdersScreen() {
 
   const doPartial = () => {
     if (!order || pickedUids.length === 0) return
-    const r = refundOrder(order.fiscalDocNo, pickedUids)
-    if (r) { printToast(`Возвратный чек №${r.fiscalDocNo} на ${formatTenge(r.amount)} (Webkassa)`); setPicked({}) }
+    setRefundReq({ uids: pickedUids, amount: pickedSum, title: 'Частичный возврат' })
   }
   const doFull = () => {
     if (!order) return
-    if (!confirm('Полный возврат по чеку?')) return
-    const r = refundOrder(order.fiscalDocNo, 'all')
-    if (r) printToast(`Полный возврат №${r.fiscalDocNo} на ${formatTenge(r.amount)}`)
+    setRefundReq({ uids: 'all', amount: order.total, title: 'Полный возврат' })
+  }
+  const confirmRefund = (opts: { reason: string; restock: boolean; by: string }) => {
+    if (!order || !refundReq) return
+    const r = refundOrder(order.fiscalDocNo, refundReq.uids, opts)
+    if (r) {
+      printToast(`Возвратный чек №${r.fiscalDocNo} на ${formatTenge(r.amount)} (Webkassa)\nПричина: ${opts.reason}${opts.restock ? ' · на склад' : ''} · ${opts.by}`)
+      setPicked({})
+    }
+    setRefundReq(null)
   }
   const doChange = (ptId: string) => {
     if (!order) return
@@ -79,12 +87,13 @@ export default function ClosedOrdersScreen() {
                 </div>
               )}
 
+              {!cashShift && <div className="text-pos-rose text-sm mb-2">Для возврата откройте кассовую смену.</div>}
               <div className="flex flex-wrap gap-2">
-                <button onClick={doPartial} disabled={pickedUids.length === 0}
-                  className={`h-11 px-4 rounded-md ${pickedUids.length ? 'bg-pos-blue' : 'bg-gray-600 opacity-40'}`}>
+                <button onClick={doPartial} disabled={pickedUids.length === 0 || !cashShift}
+                  className={`h-11 px-4 rounded-md ${pickedUids.length && cashShift ? 'bg-pos-blue' : 'bg-gray-600 opacity-40'}`}>
                   Частичный возврат{pickedUids.length > 0 ? ` (${formatTenge(pickedSum)})` : ''}
                 </button>
-                <button onClick={doFull} className="h-11 px-4 rounded-md bg-pos-rose text-gray-900">Полный возврат</button>
+                <button onClick={doFull} disabled={!cashShift} className="h-11 px-4 rounded-md bg-pos-rose text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed">Полный возврат</button>
                 <button onClick={() => setChanging(true)} className="h-11 px-4 rounded-md bg-white/10">Изменить тип оплаты</button>
                 <button onClick={() => printToast('Товарный чек')} className="h-11 px-4 rounded-md bg-white/10">Печать товарного</button>
               </div>
@@ -107,6 +116,11 @@ export default function ClosedOrdersScreen() {
       <div className="h-16 bg-white text-gray-700 flex items-center px-4">
         <BackButton onClick={() => navigate('/menu')} />
       </div>
+
+      {refundReq && (
+        <RefundModal title={refundReq.title} amount={refundReq.amount}
+          onConfirm={confirmRefund} onCancel={() => setRefundReq(null)} />
+      )}
     </div>
   )
 }
