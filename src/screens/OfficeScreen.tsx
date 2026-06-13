@@ -49,7 +49,7 @@ export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
-    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase } = usePos()
+    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
@@ -62,6 +62,7 @@ export default function OfficeScreen() {
   const [supplierId, setSupplierId] = useState('')
   const [pLines, setPLines] = useState<{ ingredientId: string; name: string; qty: number; price: number }[]>([])
   const [pIng, setPIng] = useState(ingredients[0]?.id ?? ''); const [pQty, setPQty] = useState(''); const [pPrice, setPPrice] = useState('')
+  const [outBuyer, setOutBuyer] = useState(''); const [outAmount, setOutAmount] = useState('')
   const addPLine = () => {
     const ing = ingredients.find((i) => i.id === pIng); const q = parseFloat(pQty.replace(',', '.')); const pr = parseFloat(pPrice.replace(',', '.'))
     if (!ing || !(q > 0) || !(pr > 0)) return
@@ -76,6 +77,8 @@ export default function OfficeScreen() {
   // сводка для раздела «Отчёты»
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
   const vatKz = +(revenue - revenue / 1.16).toFixed(2) // ҚҚС 16% в т.ч. с продаж
+  const incoming = invoices.filter((i) => i.kind !== 'out')
+  const outgoing = invoices.filter((i) => i.kind === 'out')
   const exportTo1C = () => {
     const data = { сформирован: 'демо', выручка: revenue, ҚҚС_к_уплате: vatKz, чеков: closedOrders.length, входящих_ЭСФ: invoices.length, накладные: invoices }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -418,11 +421,37 @@ export default function OfficeScreen() {
 
             <div className="text-gray-500 text-xs uppercase mb-2">Входящие ЭСФ / приходные</div>
             <div className="bg-white border border-gray-200 rounded-md overflow-auto">
-              {invoices.length === 0 ? <div className="p-3 text-gray-400 text-sm">Накладных пока нет.</div> : (
+              {incoming.length === 0 ? <div className="p-3 text-gray-400 text-sm">Накладных пока нет.</div> : (
                 <table className="w-full text-sm">
                   <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">№</th><th>Дата</th><th>Поставщик</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС</th><th className="p-2">ЭСФ</th></tr></thead>
                   <tbody>
-                    {invoices.map((inv) => (
+                    {incoming.map((inv) => (
+                      <tr key={inv.id} className="border-b border-gray-100 last:border-0">
+                        <td className="p-2">{inv.no}</td><td>{inv.date.split(',')[0]}</td><td>{inv.supplierName}</td>
+                        <td className="text-right">{formatTenge(inv.total)}</td><td className="text-right">{formatTenge(inv.vat)}</td><td className="p-2 font-mono text-xs">{inv.esfNo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mt-6 mb-2">Исходящие ЭСФ (покупателю)</div>
+            <div className="flex gap-2 mb-2">
+              <select value={outBuyer} onChange={(e) => setOutBuyer(e.target.value)} className="h-9 rounded border border-gray-300 px-2 flex-1">
+                <option value="">— покупатель —</option>
+                {contractors.map((c) => <option key={c.id} value={c.id}>{c.name} (БИН {c.bin})</option>)}
+              </select>
+              <input value={outAmount} onChange={(e) => setOutAmount(e.target.value)} inputMode="decimal" placeholder="сумма ₸" className="w-32 h-9 rounded border border-gray-300 px-2 text-right" />
+              <button onClick={() => { const a = parseFloat(outAmount.replace(',', '.')); if (outBuyer && a > 0) { const inv = addOutEsf(outBuyer, a); if (inv) { printToast(`Исходящая ЭСФ ${inv.esfNo} выписана`); setOutAmount('') } } }}
+                className="h-9 px-4 rounded bg-blue-600 text-white text-sm">Выписать ЭСФ</button>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              {outgoing.length === 0 ? <div className="p-3 text-gray-400 text-sm">Исходящих ЭСФ нет.</div> : (
+                <table className="w-full text-sm">
+                  <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">№</th><th>Дата</th><th>Покупатель</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС</th><th className="p-2">ЭСФ</th></tr></thead>
+                  <tbody>
+                    {outgoing.map((inv) => (
                       <tr key={inv.id} className="border-b border-gray-100 last:border-0">
                         <td className="p-2">{inv.no}</td><td>{inv.date.split(',')[0]}</td><td>{inv.supplierName}</td>
                         <td className="text-right">{formatTenge(inv.total)}</td><td className="text-right">{formatTenge(inv.vat)}</td><td className="p-2 font-mono text-xs">{inv.esfNo}</td>

@@ -192,6 +192,7 @@ interface PosState {
   markMessageRead: (id: number) => void
   addContractor: (name: string, bin: string) => void
   addPurchase: (supplierId: string, lines: InvoiceLine[]) => Invoice | null // приходная + ЭСФ + приход на склад
+  addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
@@ -536,13 +537,27 @@ export const usePos = create<PosState>((set, get) => ({
     const total = +lines.reduce((s, l) => s + l.qty * l.price, 0).toFixed(2)
     const vat = +(total - total / 1.16).toFixed(2) // ҚҚС 16% в т.ч.
     const n = get().invSeq + 1
-    const inv: Invoice = { id: n, no: `ПН-${1000 + n}`, date: fullNow(), supplierName: sup.name, supplierBin: sup.bin, lines, total, vat, esfNo: `ESF-KZ-${100000 + n}` }
+    const inv: Invoice = { id: n, no: `ПН-${1000 + n}`, date: fullNow(), supplierName: sup.name, supplierBin: sup.bin, lines, total, vat, esfNo: `ESF-KZ-${100000 + n}`, kind: 'in' }
     set((st) => {
       const ingredients = st.ingredients.map((i) => { const l = lines.find((x) => x.ingredientId === i.id); return l ? { ...i, stock: +(i.stock + l.qty).toFixed(3) } : i })
       persistIngredients(ingredients)
       const invoices = [inv, ...st.invoices]
       try { localStorage.setItem('iiko-invoices', JSON.stringify(invoices)) } catch { /* ignore */ }
       return { invoices, invSeq: n, ingredients }
+    })
+    return inv
+  },
+  addOutEsf: (buyerId, amount) => {
+    const b = get().contractors.find((c) => c.id === buyerId)
+    if (!b || !(amount > 0)) return null
+    const n = get().invSeq + 1
+    const total = +amount.toFixed(2)
+    const vat = +(total - total / 1.16).toFixed(2)
+    const inv: Invoice = { id: n, no: `ЭСФ-OUT-${1000 + n}`, date: fullNow(), supplierName: b.name, supplierBin: b.bin, lines: [], total, vat, esfNo: `ESF-OUT-${100000 + n}`, kind: 'out' }
+    set((st) => {
+      const invoices = [inv, ...st.invoices]
+      try { localStorage.setItem('iiko-invoices', JSON.stringify(invoices)) } catch { /* ignore */ }
+      return { invoices, invSeq: n }
     })
     return inv
   },

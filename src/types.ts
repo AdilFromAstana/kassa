@@ -180,7 +180,8 @@ export interface Invoice {
   lines: InvoiceLine[]
   total: number       // сумма с ҚҚС
   vat: number         // ҚҚС в т.ч. (16%)
-  esfNo: string       // № входящей ЭСФ (ИС ЭСФ)
+  esfNo: string       // № ЭСФ (ИС ЭСФ)
+  kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
 }
 
 export interface Message {
