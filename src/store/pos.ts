@@ -13,7 +13,11 @@ import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
 export const isStopped = (stopList: StopItem[], dishId: string) =>
-  stopList.some((s) => s.dishId === dishId && (s.remaining === undefined || s.remaining <= 0))
+  stopList.some((s) => s.dishId === dishId && !s.optionId && (s.remaining === undefined || s.remaining <= 0))
+
+// Стоп конкретного модификатора (опции) — блокирует выбор опции в окне модификаторов.
+export const isOptionStopped = (stopList: StopItem[], optionId: string) =>
+  stopList.some((s) => s.optionId === optionId)
 
 // Уменьшение остатка стоп-листа на проданные позиции (вызывается при оплате).
 const applyStopDecrement = (stopList: StopItem[], lines: OrderLine[]): StopItem[] => {
@@ -303,6 +307,9 @@ interface PosState {
   addStop: (dishId: string, remaining?: number) => void
   removeStop: (dishId: string) => void
   setStopRemaining: (dishId: string, remaining: number) => void
+  addStopOption: (optionId: string, name: string) => void // стоп модификатора (опции)
+  removeStopOption: (optionId: string) => void
+  clearStops: () => void // снять все с продажи
   can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
   hasRightFor: (positions: string[] | undefined, code: string) => boolean // право для произвольных должностей
   toggleRoleRight: (position: string, code: string) => void // правка карты прав в офисе
@@ -708,7 +715,14 @@ export const usePos = create<PosState>((set, get) => ({
   removeStop: (dishId) =>
     set((st) => ({ stopList: st.stopList.filter((s) => s.dishId !== dishId) })),
   setStopRemaining: (dishId, remaining) =>
-    set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
+    set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId && !s.optionId ? { ...s, remaining } : s)) })),
+  addStopOption: (optionId, name) =>
+    set((st) => (st.stopList.some((s) => s.optionId === optionId)
+      ? st
+      : { stopList: [...st.stopList, { dishId: '', optionId, name, byName: st.user?.name ?? '—', at: fullNow() }] })),
+  removeStopOption: (optionId) =>
+    set((st) => ({ stopList: st.stopList.filter((s) => s.optionId !== optionId) })),
+  clearStops: () => set({ stopList: [] }),
   can: (code) => hasRightIn(get().roleRights, get().user?.positions, code),
   cashInDrawer: () => {
     const st = get()

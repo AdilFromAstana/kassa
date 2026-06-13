@@ -52,7 +52,9 @@ export interface TechCardItem {
 }
 
 export interface StopItem {
-  dishId: string
+  dishId: string       // '' если это стоп модификатора (по optionId)
+  optionId?: string    // стоп конкретного модификатора (опции), а не блюда
+  name?: string        // отображаемое имя (для модификатора — название опции)
   remaining?: number   // остаток порций; undefined = полный стоп (недоступно). >0 — продаётся, тает, при 0 → стоп
   byName: string       // кто внёс
   at: string           // когда (дата-время)

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Dish, SelectedModifier } from '../types'
 import { findModifierGroup } from '../mock/menu'
+import { usePos, isOptionStopped } from '../store/pos'
 import { formatTenge } from '../lib/money'
 
 interface Props {
@@ -15,6 +16,7 @@ export default function ModifiersModal({ dish, onConfirm, onCancel }: Props) {
     () => (dish.modifierGroupIds ?? []).map(findModifierGroup).filter(Boolean) as NonNullable<ReturnType<typeof findModifierGroup>>[],
     [dish],
   )
+  const stopList = usePos((s) => s.stopList)
   const [step, setStep] = useState(0)
   const [picked, setPicked] = useState<Record<string, number>>({}) // optionId -> qty
   const group = groups[step]
@@ -53,16 +55,19 @@ export default function ModifiersModal({ dish, onConfirm, onCancel }: Props) {
           Группа «<b>{group.name}</b>»
         </div>
         <div className="flex flex-col gap-2 max-h-[50vh] overflow-auto">
-          {group.options.map((o) => (
-            <div key={o.id} className="flex items-center justify-between border border-gray-200 rounded-md px-3 h-12">
-              <div>{o.name}{o.price > 0 && <span className="text-gray-400 text-sm"> · +{formatTenge(o.price)}</span>}</div>
-              <div className="flex items-center gap-3">
-                <button className="pad-key w-9 h-9" onClick={() => change(o.id, -1)}>−</button>
-                <span className="w-5 text-center">{picked[o.id] ?? 0}</span>
-                <button className="pad-key w-9 h-9" onClick={() => change(o.id, +1)}>+</button>
+          {group.options.map((o) => {
+            const stopped = isOptionStopped(stopList, o.id)
+            return (
+              <div key={o.id} className={`flex items-center justify-between border border-gray-200 rounded-md px-3 h-12 ${stopped ? 'opacity-50' : ''}`}>
+                <div>{o.name}{o.price > 0 && <span className="text-gray-400 text-sm"> · +{formatTenge(o.price)}</span>}{stopped && <span className="ml-2 text-xs bg-pos-rose text-gray-900 rounded px-1">стоп</span>}</div>
+                <div className="flex items-center gap-3">
+                  <button disabled={stopped} className="pad-key w-9 h-9 disabled:opacity-30" onClick={() => change(o.id, -1)}>−</button>
+                  <span className="w-5 text-center">{picked[o.id] ?? 0}</span>
+                  <button disabled={stopped} className="pad-key w-9 h-9 disabled:opacity-30" onClick={() => change(o.id, +1)}>+</button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="text-sm text-gray-500">
           Минимум: {group.min} · Максимум: {group.max} · Введено: {inGroupCount}

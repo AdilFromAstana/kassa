@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
 import { Ban, Trash2 } from 'lucide-react'
-import { usePos } from '../store/pos'
-import { menuGroups, dishesByGroup, findDish } from '../mock/menu'
+import { usePos, isOptionStopped } from '../store/pos'
+import { menuGroups, dishesByGroup, findDish, modifierGroups } from '../mock/menu'
 import TopBar from '../components/TopBar'
 import QuantityModal from '../components/QuantityModal'
 
@@ -11,7 +11,7 @@ import QuantityModal from '../components/QuantityModal'
 // справа меню для добавления. Полный стоп = недоступно; остаток N — продаётся, тает при оплате, при 0 → стоп.
 export default function StopListScreen() {
   const navigate = useNavigate()
-  const { stopList, addStop, removeStop, setStopRemaining, can } = usePos()
+  const { stopList, addStop, removeStop, setStopRemaining, addStopOption, removeStopOption, clearStops, can } = usePos()
   const canEdit = can('F_EM') // «Редактировать стоп-лист и быстрое меню» — обычно у менеджера
   const [editId, setEditId] = useState<string | null>(null)
 
@@ -26,12 +26,31 @@ export default function StopListScreen() {
       <div className="flex-1 flex overflow-hidden">
         {/* слева — позиции в стоп-листе */}
         <div className="w-[42%] border-r border-white/10 flex flex-col">
-          <div className="px-5 py-3 text-xs uppercase text-pos-accent bg-black/30">В стоп-листе: {stopList.length}</div>
+          <div className="px-5 py-2 bg-black/30 flex items-center gap-2">
+            <span className="text-xs uppercase text-pos-accent">В стоп-листе: {stopList.length}</span>
+            {stopList.length > 0 && (
+              <button onClick={() => clearStops()} disabled={!canEdit}
+                className="ml-auto h-8 px-3 rounded text-xs bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed">Снять все с продажи</button>
+            )}
+          </div>
           <div className="flex-1 overflow-auto">
             {stopList.length === 0 && (
-              <div className="p-5 text-white/40 text-sm">Стоп-лист пуст. Выберите блюдо справа, чтобы снять с продажи.</div>
+              <div className="p-5 text-white/40 text-sm">Стоп-лист пуст. Выберите блюдо или модификатор справа, чтобы снять с продажи.</div>
             )}
             {stopList.map((s) => {
+              // стоп модификатора (опции) — без остатка, снимается отдельно
+              if (s.optionId) {
+                return (
+                  <div key={s.optionId} className="flex items-center gap-3 px-4 h-16 border-b border-white/10">
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate">{s.name} <span className="text-xs text-pos-accent">· модификатор</span></div>
+                      <div className="text-xs text-white/40">{s.byName} · {s.at}</div>
+                    </div>
+                    <span className="h-9 px-3 rounded text-sm inline-flex items-center gap-1 bg-pos-rose/40 text-pos-rose"><Ban size={12} /> стоп</span>
+                    <button onClick={() => removeStopOption(s.optionId!)} disabled={!canEdit} className="text-white/50 hover:text-pos-rose disabled:opacity-30 disabled:cursor-not-allowed" title="Вернуть в продажу"><Trash2 size={18} /></button>
+                  </div>
+                )
+              }
               const d = findDish(s.dishId)
               const out = s.remaining === undefined || s.remaining <= 0
               return (
@@ -76,6 +95,28 @@ export default function StopListScreen() {
                 </div>
               )
             })}
+          </div>
+
+          {/* модификаторы — снять отдельную опцию (например, конкретный размер/добавку) */}
+          <div className="text-white/50 text-sm mt-6 mb-3">Модификаторы — снять с продажи отдельную опцию (печать на марке/выбор в окне модификаторов заблокируется).</div>
+          <div className="grid grid-cols-2 gap-5">
+            {modifierGroups.map((mg) => (
+              <div key={mg.id}>
+                <div className="text-pos-accent text-sm uppercase mb-2">{mg.name}</div>
+                <div className="flex flex-col gap-1">
+                  {mg.options.map((o) => {
+                    const inStop = isOptionStopped(stopList, o.id)
+                    return (
+                      <button key={o.id} disabled={inStop || !canEdit} onClick={() => addStopOption(o.id, o.name)}
+                        className={`flex items-center justify-between h-11 px-3 rounded-md ${inStop || !canEdit ? 'bg-white/5 text-white/30 cursor-not-allowed' : 'bg-white/5 hover:bg-white/10'}`}>
+                        <span>{o.name}</span>
+                        {inStop && <span className="text-xs text-pos-rose inline-flex items-center gap-1"><Ban size={12} /> в стопе</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
