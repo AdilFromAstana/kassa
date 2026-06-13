@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
-  Ingredient, WriteOff, PriceOrder, PriceOrderLine,
+  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed } from '../mock/data'
@@ -84,6 +84,15 @@ function persistPriceOrders(list: PriceOrder[]) {
   try { localStorage.setItem('iiko-price-orders', JSON.stringify(list)) } catch { /* ignore */ }
 }
 
+// Выплаты сотрудникам (аванс/расчёт) — платёжная ведомость.
+function loadSalary(): SalaryPayout[] {
+  try { const raw = localStorage.getItem('iiko-salary'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return []
+}
+function persistSalary(list: SalaryPayout[]) {
+  try { localStorage.setItem('iiko-salary', JSON.stringify(list)) } catch { /* ignore */ }
+}
+
 // Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
 function loadRoleRights(): Record<string, string[]> {
   const base: Record<string, string[]> = {}
@@ -163,6 +172,8 @@ interface PosState {
   invSeq: number
   priceOrders: PriceOrder[] // приказы об изменении цен (Прейскурант)
   priceOrderSeq: number
+  salaryPayouts: SalaryPayout[] // выплаты сотрудникам (аванс/расчёт)
+  salaryPayoutSeq: number
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -230,6 +241,9 @@ interface PosState {
   createPriceOrder: (lines: PriceOrderLine[], date: string, note: string) => PriceOrder | null
   activatePriceOrder: (id: number) => void
 
+  // зарплата: выдача аванса/расчёта → изъятие наличных из кассы (связь офис↔касса)
+  paySalary: (staffId: string, kind: 'advance' | 'settlement', amount: number) => void
+
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
   setIngredientStock: (ingredientId: string, qty: number) => void // инвентаризация (выставить факт)
@@ -271,6 +285,8 @@ export const usePos = create<PosState>((set, get) => ({
   invSeq: loadInvoices().length,
   priceOrders: loadPriceOrders(),
   priceOrderSeq: loadPriceOrders().length,
+  salaryPayouts: loadSalary(),
+  salaryPayoutSeq: loadSalary().length,
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -698,6 +714,26 @@ export const usePos = create<PosState>((set, get) => ({
     persistPriceOrders(list)
     return { priceOverrides: prices, priceOrders: list }
   }),
+
+  // Выдача аванса/расчёта сотруднику. Фактическая выдача = изъятие наличных из кассы
+  // (тип содержит «зарплат» → попадает в отчёт 038 и пересчёт смены). Ведомость персистится отдельно.
+  paySalary: (staffId, kind, amount) => {
+    if (!(amount > 0)) return
+    set((st) => {
+      const by = st.user?.name ?? 'Офис'
+      const payout: SalaryPayout = { id: st.salaryPayoutSeq + 1, staffId, kind, amount, at: fullNow(), by }
+      const list = [payout, ...st.salaryPayouts]
+      persistSalary(list)
+      const name = st.staffList.find((s) => s.id === staffId)?.name ?? ''
+      const type = kind === 'advance' ? 'Выдача аванса (зарплата)' : 'Выплата зарплаты'
+      return {
+        salaryPayouts: list,
+        salaryPayoutSeq: st.salaryPayoutSeq + 1,
+        cashMovements: [{ id: st.movementSeq + 1, kind: 'out' as const, type, amount, comment: name, at: fullNow() }, ...st.cashMovements],
+        movementSeq: st.movementSeq + 1,
+      }
+    })
+  },
 
   receiveStock: (ingredientId, qty) => set((st) => {
     const ingredients = st.ingredients.map((i) =>

@@ -170,6 +170,17 @@ export interface Staff {
   positions: string[]
 }
 
+// Выплата сотруднику (платёжная ведомость iiko): аванс (середина месяца) или расчёт (конец).
+// Метод начисления: сначала начислено (оклад − налоги), затем выдаётся аванс + расчёт.
+export interface SalaryPayout {
+  id: number
+  staffId: string
+  kind: 'advance' | 'settlement' // аванс / расчёт
+  amount: number
+  at: string
+  by: string // кто провёл (офис)
+}
+
 // Приказ об изменении цен (Прейскурант, iikoOffice). Активация → цены уезжают на кассу.
 export interface PriceOrderLine {
   dishId: string
