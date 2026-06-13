@@ -314,6 +314,8 @@ interface PosState {
   hasRightFor: (positions: string[] | undefined, code: string) => boolean // право для произвольных должностей
   toggleRoleRight: (position: string, code: string) => void // правка карты прав в офисе
   markMessageRead: (id: number) => void
+  markAllMessagesRead: () => void
+  replyMessage: (toTitle: string, text: string) => void
   addContractor: (name: string, bin: string) => void
   addPurchase: (supplierId: string, lines: InvoiceLine[]) => Invoice | null // приходная + ЭСФ + приход на склад
   addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
@@ -746,6 +748,12 @@ export const usePos = create<PosState>((set, get) => ({
   },
   hasRightFor: (positions, code) => hasRightIn(get().roleRights, positions, code),
   markMessageRead: (id) => set((st) => ({ messages: st.messages.map((m) => (m.id === id ? { ...m, unread: false } : m)) })),
+  markAllMessagesRead: () => set((st) => ({ messages: st.messages.map((m) => (m.unread ? { ...m, unread: false } : m)) })),
+  replyMessage: (toTitle, text) => set((st) => {
+    const id = st.messages.reduce((mx, m) => Math.max(mx, m.id), 0) + 1
+    const reply: Message = { id, from: st.user?.name ?? 'Сотрудник', date: fullNow(), title: `Re: ${toTitle}`, body: text, unread: false, outgoing: true }
+    return { messages: [reply, ...st.messages] }
+  }),
 
   addContractor: (name, bin) => set((st) => {
     if (!name || !bin || st.contractors.some((c) => c.bin === bin)) return st

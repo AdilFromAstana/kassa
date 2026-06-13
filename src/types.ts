@@ -299,6 +299,8 @@ export interface Message {
   body: string
   unread: boolean
   important?: boolean // важное сообщение — выделяется красным
+  attachments?: string[] // вложения (имена файлов; печать/скачивание — мок)
+  outgoing?: boolean      // исходящий ответ сотрудника (в офис)
 }
 
 export interface Table {
