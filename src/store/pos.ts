@@ -286,6 +286,9 @@ interface PosState {
   removeLine: (uid: string) => void
   setGuestNo: (uid: string, guestNo: number | undefined) => void
   setLineComment: (uid: string, comment: string) => void
+  setLineCourse: (uid: string, course: number | undefined) => void
+  setOrderWaiter: (orderId: number, waiter: string) => void
+  setOrderType: (orderId: number, type: OrderType) => void
   setDiscount: (pct: number) => void
   setSurcharge: (pct: number) => void
   precheck: () => void
@@ -543,6 +546,16 @@ export const usePos = create<PosState>((set, get) => ({
   setLineComment: (uid, comment) => set((st) => ({
     orders: st.orders.map((o) => o.id === st.currentOrderId
       ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, comment: comment || undefined } : l)) } : o),
+  })),
+  setLineCourse: (uid, course) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, course } : l)) } : o),
+  })),
+  setOrderWaiter: (orderId, waiter) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === orderId ? { ...o, waiter } : o)),
+  })),
+  setOrderType: (orderId, type) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === orderId ? { ...o, type } : o)),
   })),
   setDiscount: (pct) => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, discountPct: pct } : o)),

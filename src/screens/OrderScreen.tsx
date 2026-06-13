@@ -31,6 +31,9 @@ export default function OrderScreen() {
   const [showMore, setShowMore] = useState(false)
   const [showDiscount, setShowDiscount] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [waiterPick, setWaiterPick] = useState(false)
+  const [typePick, setTypePick] = useState(false)
+  const [coursePick, setCoursePick] = useState(false)
 
   useEffect(() => { if (!order) navigate('/halls') }, [order, navigate])
   // при переключении на другой заказ — сбросить активного гостя и выбор
@@ -90,6 +93,12 @@ export default function OrderScreen() {
 
   const est = pos.establishment
   const isRest = est.mode === 'restaurant' // ресторан: гости/деление/перенос/пречек; фастфуд — нет
+  const TYPE_LABEL: Record<string, string> = { dinein: 'Зал', takeaway: 'Вынос', delivery: 'Доставка' }
+  const courseList = order.lines.length ? Array.from(new Set(order.lines.map((l) => l.course).filter((c): c is number => !!c))).sort() : []
+  const serveCourse = (c: number) => {
+    const items = order.lines.filter((l) => l.course === c).map((l) => `${l.qty}× ${l.name}`)
+    printToast(items.length ? `Подан курс ${c} · ${tableLabel}\n${items.join('\n')}` : `В курсе ${c} нет позиций`)
+  }
   const guestList = Array.from({ length: order.guests }, (_, i) => i + 1)
   const guestLines = order.lines.filter((l) => guestOf(l.guestNo) === activeGuest)
   const guestSum = (g: number) => order.lines.filter((l) => guestOf(l.guestNo) === g).reduce((s, l) => s + lineTotal(l), 0)
@@ -127,6 +136,7 @@ export default function OrderScreen() {
           <div className="bg-pos-blue text-white px-3 py-2 text-sm flex items-center gap-2">
             <Receipt size={15} /><span>{order.openedAt}</span>
             <span>· {tableLabel}</span>
+            <span className="px-1.5 rounded bg-black/20 text-xs">{TYPE_LABEL[order.type]}</span>
             <span className="flex items-center gap-1">· <Users size={15} /> {order.guests}</span>
             <span className="ml-auto">{order.waiter}</span>
           </div>
@@ -139,7 +149,7 @@ export default function OrderScreen() {
               <div key={l.uid} onClick={() => setSelUid(l.uid)}
                 className={`px-3 py-1.5 border-b border-gray-200 cursor-pointer ${selUid === l.uid ? 'bg-pos-accent' : ''}`}>
                 <div className="flex justify-between items-baseline">
-                  <span><span className="text-gray-400 mr-2">{i + 1}</span>{l.name}{l.qty !== 1 && <span className="text-gray-500"> × {String(l.qty).replace('.', ',')}</span>}</span>
+                  <span><span className="text-gray-400 mr-2">{i + 1}</span>{l.name}{l.qty !== 1 && <span className="text-gray-500"> × {String(l.qty).replace('.', ',')}</span>}{l.course ? <span className="ml-1.5 text-[10px] bg-pos-blue text-white rounded px-1 align-middle">К{l.course}</span> : null}</span>
                   <span className="font-medium">{formatTenge(lineTotal(l))}</span>
                 </div>
                 {l.modifiers.length > 0 && (
@@ -249,6 +259,9 @@ export default function OrderScreen() {
             {[
               { label: 'Скидка', on: () => setDiscount(), disabled: !pos.can('F_ID') },
               { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
+              { label: 'Сменить официанта', on: () => setWaiterPick(true), disabled: false },
+              { label: `Тип заказа: ${TYPE_LABEL[order.type]}`, on: () => setTypePick(true), disabled: false },
+              ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
               { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
@@ -337,6 +350,70 @@ export default function OrderScreen() {
               ))}
             </div>
             <button onClick={() => setGuestPay(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Закрыть</button>
+          </div>
+        </div>
+      )}
+
+      {/* сменить официанта на заказе */}
+      {waiterPick && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setWaiterPick(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-5 w-[380px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-3">Официант заказа</div>
+            <div className="grid grid-cols-2 gap-2 max-h-72 overflow-auto">
+              {pos.staffList.map((s) => (
+                <button key={s.id} onClick={() => { pos.setOrderWaiter(order.id, s.name); setWaiterPick(false); printToast(`Официант заказа: ${s.name}`) }}
+                  className={`h-12 rounded-md px-2 text-sm ${s.name === order.waiter ? 'bg-gray-200' : 'bg-pos-blue text-white'}`}>{s.name}</button>
+              ))}
+            </div>
+            <button onClick={() => setWaiterPick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* переключение типа заказа (зал / вынос / доставка) */}
+      {typePick && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setTypePick(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-3">Тип заказа</div>
+            <div className="flex flex-col gap-2">
+              {(['dinein', 'takeaway', 'delivery'] as const).map((t) => (
+                <button key={t} onClick={() => { pos.setOrderType(order.id, t); setTypePick(false); printToast(`Тип заказа: ${TYPE_LABEL[t]}`) }}
+                  className={`h-12 rounded-md ${order.type === t ? 'bg-gray-200' : 'bg-pos-blue text-white'}`}>{TYPE_LABEL[t]}</button>
+              ))}
+            </div>
+            <button onClick={() => setTypePick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* курсы подачи: назначить курс выбранной позиции + подать курс на кухню */}
+      {coursePick && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setCoursePick(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-5 w-[400px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-1">Курсы подачи</div>
+            {selUid && selLine ? (
+              <>
+                <div className="text-sm text-gray-500 mb-3">Позиция: {selLine.name} {selLine.course ? `· сейчас курс ${selLine.course}` : '· курс не задан'}</div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3].map((c) => (
+                    <button key={c} onClick={() => { pos.setLineCourse(selUid, c); setCoursePick(false) }}
+                      className={`h-12 rounded-md ${selLine.course === c ? 'bg-gray-200' : 'bg-pos-blue text-white'}`}>Курс {c}</button>
+                  ))}
+                  <button onClick={() => { pos.setLineCourse(selUid, undefined); setCoursePick(false) }} className="h-12 rounded-md bg-gray-100">Без курса</button>
+                </div>
+              </>
+            ) : <div className="text-sm text-gray-500 mb-3">Выберите позицию, чтобы назначить ей курс.</div>}
+            {courseList.length > 0 && (
+              <div className="mt-4">
+                <div className="text-sm text-gray-500 mb-2">Подать курс на кухню:</div>
+                <div className="flex flex-wrap gap-2">
+                  {courseList.map((c) => (
+                    <button key={c} onClick={() => { serveCourse(c); setCoursePick(false) }} className="h-11 px-4 rounded-md bg-pos-green text-white">Подать курс {c}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button onClick={() => setCoursePick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Закрыть</button>
           </div>
         </div>
       )}

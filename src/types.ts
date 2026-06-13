@@ -88,6 +88,7 @@ export interface OrderLine {
   modifiers: SelectedModifier[]
   guestNo?: number // для деления между гостями
   comment?: string // комментарий к позиции (печатается на марке кухни)
+  course?: number  // курс подачи (1/2/3…); не задан = без курса
 }
 
 export type OrderType = 'dinein' | 'takeaway' | 'delivery'
