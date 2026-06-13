@@ -194,7 +194,7 @@ export default function OrderScreen() {
                     return (
                       <button key={d.id} disabled={stopped} className={`tile relative ${stopped ? 'opacity-40 cursor-not-allowed' : ''}`}
                         style={{ background: d.color ?? '#e9e4d8' }} onClick={() => addDish(d)}>
-                        <span className="tile-dish">{d.name}<br /><span className="opacity-70">{formatTenge(d.price)}</span></span>
+                        <span className="tile-dish">{d.name}<br /><span className="opacity-70">{formatTenge(pos.priceOf(d.id, d.price))}</span></span>
                         {stopped && <span className="absolute top-1 right-1 text-[10px] bg-pos-rose text-gray-900 rounded px-1">{manualStop ? 'стоп' : 'нет'}</span>}
                         {low && <span className="absolute top-1 right-1 text-[10px] bg-amber-400 text-gray-900 rounded px-1">{max} шт</span>}
                       </button>

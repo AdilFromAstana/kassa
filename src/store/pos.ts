@@ -45,6 +45,12 @@ function loadEstablishment(): Establishment {
   return DEFAULT_ESTABLISHMENT
 }
 
+// Ценовые оверрайды меню (правятся в офисе → касса применяет). dishId → цена ₸.
+function loadPriceOverrides(): Record<string, number> {
+  try { const raw = localStorage.getItem('iiko-menu-prices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+
 // Остатки склада: база из warehouse.ts, поверх — сохранённые остатки из localStorage (id → stock).
 function loadIngredients(): Ingredient[] {
   try {
@@ -107,6 +113,7 @@ interface PosState {
   stopList: StopItem[] // стоп-лист: dishId + остаток порций + кто/когда внёс
   ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
+  priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -152,6 +159,8 @@ interface PosState {
   can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
+  priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
+  setDishPrice: (dishId: string, price: number) => void  // правка цены в офисе
 
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
@@ -185,6 +194,7 @@ export const usePos = create<PosState>((set, get) => ({
   stopList: [],
   ingredients: loadIngredients(),
   establishment: loadEstablishment(),
+  priceOverrides: loadPriceOverrides(),
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -265,7 +275,7 @@ export const usePos = create<PosState>((set, get) => ({
           }
         }
         const line: OrderLine = {
-          uid: nextUid(), dishId, name: dish.name, price: dish.price, vat: dish.vat, qty: 1, modifiers, guestNo,
+          uid: nextUid(), dishId, name: dish.name, price: get().priceOf(dishId, dish.price), vat: dish.vat, qty: 1, modifiers, guestNo,
         }
         return { ...o, lines: [...o.lines, line] }
       }),
@@ -484,6 +494,12 @@ export const usePos = create<PosState>((set, get) => ({
     const next = { ...st.establishment, ...patch }
     try { localStorage.setItem('iiko-establishment', JSON.stringify(next)) } catch { /* ignore */ }
     return { establishment: next }
+  }),
+  priceOf: (dishId, basePrice) => get().priceOverrides[dishId] ?? basePrice,
+  setDishPrice: (dishId, price) => set((st) => {
+    const next = { ...st.priceOverrides, [dishId]: price }
+    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(next)) } catch { /* ignore */ }
+    return { priceOverrides: next }
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {

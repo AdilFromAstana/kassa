@@ -11,7 +11,7 @@ interface Props { onPick: (d: Dish) => void; onClose: () => void }
 // Полноэкранный «ПОИСК ТОВАРА» (iikoFront): результаты + сенсорная клавиатура.
 // Ввод — через настоящий <input> (физическая клава, сканер ШК, IME) + сенсорная клавиатура append'ит в то же поле.
 export default function SearchModal({ onPick, onClose }: Props) {
-  const { stopList } = usePos()
+  const { stopList, priceOf } = usePos()
   const [q, setQ] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const results = searchDishes(q)
@@ -44,7 +44,7 @@ export default function SearchModal({ onPick, onClose }: Props) {
                 <button key={d.id} disabled={stopped} onClick={() => onPick(d)}
                   className={`flex items-center justify-between h-14 px-4 rounded-md text-left ${stopped ? 'bg-white/10 text-white/30 cursor-not-allowed' : 'bg-white text-gray-800 active:bg-gray-100'}`}>
                   <span><span className="font-mono text-xs text-gray-400 mr-3">{d.code}</span>{d.name}{stopped && <span className="text-pos-rose text-xs ml-2 inline-flex items-center gap-1"><Ban size={12} /> в стопе</span>}</span>
-                  <span className="text-gray-600">{formatTenge(d.price)}</span>
+                  <span className="text-gray-600">{formatTenge(priceOf(d.id, d.price))}</span>
                 </button>
               )
             })}
