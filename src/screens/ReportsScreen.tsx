@@ -5,7 +5,7 @@ import { usePos, lineTotal } from '../store/pos'
 import { formatTenge, vatAmount } from '../lib/money'
 import { printToast, toast } from '../lib/print'
 import ReportParamsModal from '../components/ReportParamsModal'
-import { attendance } from '../mock/data'
+import { attendance, halls } from '../mock/data'
 import { dishCost } from '../mock/warehouse'
 import TopBar from '../components/TopBar'
 import type { ClosedOrder } from '../types'
@@ -82,12 +82,19 @@ const tableLabel = (o: ClosedOrder) => (o.tableId ? `стол ${o.tableId.replac
 
 export default function ReportsScreen() {
   const navigate = useNavigate()
-  const { closedOrders, cashShift, cashMovements, refunds, writeOffs, ingredients } = usePos()
+  const { closedOrders: allClosed, orders: openOrders, cashShift, cashMovements, refunds, writeOffs, ingredients } = usePos()
   const [sel, setSel] = useState('011')
   const [showParams, setShowParams] = useState(false)
   const [period, setPeriod] = useState(() => { const d = new Date(); return { from: d, to: d } })
+  const [fHall, setFHall] = useState('')   // фильтр по залу ('' = все)
+  const [fWaiter, setFWaiter] = useState('') // фильтр по официанту ('' = все)
   const hasParams = !NO_PARAM_IDS.has(sel)
   const fmtShort = (d: Date) => d.toLocaleDateString('ru-RU')
+
+  // фильтры зал/официант применяются к продажам (как в iikoFront «Параметры → Зал/Официант»)
+  const hallName = (id: string | null) => halls.find((h) => h.id === id)?.name ?? '—'
+  const waiters = Array.from(new Set(allClosed.map((o) => o.waiter)))
+  const closedOrders = allClosed.filter((o) => (!fHall || o.hallId === fHall) && (!fWaiter || o.waiter === fWaiter))
 
   // ───────────────────────── агрегаты смены ─────────────────────────
   const count = closedOrders.length
@@ -143,7 +150,7 @@ export default function ReportsScreen() {
 
   // ───────────────────────── рендер тела отчёта ─────────────────────────
   const body = () => {
-    if (noData && !['035'].includes(sel)) return <Empty text="— за смену нет чеков (сгенерируйте демо-данные) —" />
+    if (noData && !['035', '015', '039'].includes(sel)) return <Empty text="— за смену нет чеков (сгенерируйте демо-данные) —" />
     switch (sel) {
       case 'x':
         return <>
@@ -341,6 +348,49 @@ export default function ReportsScreen() {
             {tipsTotal === 0 && <Empty text="— нет —" />}
           </Block>
         </>
+      case '015': {
+        // краткий отчёт: открытые заказы и продажи в разрезе залов
+        const rows = halls.map((h) => {
+          const open = openOrders.filter((o) => o.hallId === h.id)
+          const openSum = open.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineTotal(l), 0), 0)
+          const sold = closedOrders.filter((o) => o.hallId === h.id)
+          const soldSum = sold.reduce((s, o) => s + o.total, 0)
+          return { name: h.name, openCount: open.length, openSum, soldCount: sold.length, soldSum }
+        })
+        const openTotal = rows.reduce((s, r) => s + r.openSum, 0)
+        return <>
+          <div className="text-gray-500">Зал · открытые (сумма) · продажи (сумма)</div>
+          {rows.map((r) => (
+            <div key={r.name} className="py-0.5">
+              <div className="flex justify-between"><span>{r.name}</span><span>{formatTenge(r.soldSum)}</span></div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>открытых: {r.openCount} ({formatTenge(r.openSum)}) · чеков: {r.soldCount}</span>
+              </div>
+            </div>
+          ))}
+          <Hr />
+          <Row k="Открытые заказы (зал)" v={formatTenge(openTotal)} />
+          <Row k="Продажи закрытые" v={formatTenge(revenue)} b />
+        </>
+      }
+      case '039': {
+        // вскрытие тары: проданные порционно напитки из тары (бутылки/кеги)
+        const TARE = ['d-cola', 'd-water', 'd-beer', 'd-wine']
+        const tare: Record<string, { name: string; qty: number }> = {}
+        closedOrders.forEach((o) => o.lines.forEach((l) => {
+          if (TARE.includes(l.dishId)) { const t = (tare[l.dishId] ??= { name: l.name, qty: 0 }); t.qty += l.qty }
+        }))
+        const list = Object.values(tare)
+        const totalQty = list.reduce((s, t) => s + t.qty, 0)
+        return <>
+          {list.length === 0 && <Empty text="— вскрытий тары за смену нет —" />}
+          {list.length > 0 && <>
+            <div className="text-gray-500">Позиция (тара) · вскрыто</div>
+            {list.map((t) => <Row key={t.name} k={t.name} v={`${t.qty} ед.`} />)}
+            <Hr /><Row k="Всего вскрытий тары" v={`${totalQty} ед.`} b />
+          </>}
+        </>
+      }
       default:
         return <Empty />
     }
@@ -371,7 +421,22 @@ export default function ReportsScreen() {
         </div>
 
         <div className="flex-1 p-6 overflow-auto">
+          {/* быстрые фильтры зал/официант (для отчётов по продажам) */}
+          <div className="flex items-center justify-center gap-3 mb-4 text-sm">
+            <span className="text-white/50">Зал:</span>
+            <select value={fHall} onChange={(e) => setFHall(e.target.value)} className="h-9 rounded px-2 text-gray-800">
+              <option value="">все</option>
+              {halls.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+            <span className="text-white/50">Официант:</span>
+            <select value={fWaiter} onChange={(e) => setFWaiter(e.target.value)} className="h-9 rounded px-2 text-gray-800">
+              <option value="">все</option>
+              {waiters.map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+            {(fHall || fWaiter) && <button onClick={() => { setFHall(''); setFWaiter('') }} className="h-9 px-3 rounded bg-white/10">Сбросить</button>}
+          </div>
           <div className="bg-white text-gray-800 rounded-lg p-6 max-w-md mx-auto font-mono text-sm">
+            {(fHall || fWaiter) && <div className="text-center text-xs text-pos-blue mb-2">Фильтр: {fHall ? hallName(fHall) : 'все залы'}{fWaiter ? ` · ${fWaiter}` : ''}</div>}
             <div className="text-center font-bold">{repName.replace(/^\d+\s/, '')}</div>
             <div className="text-center text-xs text-gray-500 mb-3">
               Терминал №998 · Кассовая смена №{cashShift?.no ?? '—'}<br />KZ ҚҚС 16% · {cashShift?.openedAt?.split(',')[0] ?? ''}
@@ -395,6 +460,7 @@ export default function ReportsScreen() {
             Параметры
           </button>
           <button onClick={() => toast(`Отчёт «${repName}» обновлён`)} className="h-12 px-6 rounded-md border border-gray-300 hover:bg-gray-100">Обновить</button>
+          <button onClick={() => toast(`Отчёт «${repName}» выгружен в Excel (.xlsx)`)} className="h-12 px-6 rounded-md border border-gray-300 hover:bg-gray-100">Excel…</button>
           <button onClick={() => printToast(`Отчёт «${repName}» распечатан`)} className="h-12 px-8 rounded-md bg-pos-blue text-white">Печать</button>
         </div>
       </div>
