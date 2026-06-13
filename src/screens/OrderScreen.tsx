@@ -164,7 +164,7 @@ export default function OrderScreen() {
               <div key={l.uid} onClick={() => setSelUid(l.uid)}
                 className={`px-3 py-1.5 border-b border-gray-200 cursor-pointer ${selUid === l.uid ? 'bg-pos-accent' : ''}`}>
                 <div className="flex justify-between items-baseline">
-                  <span><span className="text-gray-400 mr-2">{i + 1}</span>{l.name}{l.qty !== 1 && <span className="text-gray-500"> × {String(l.qty).replace('.', ',')}</span>}{l.course ? <span className="ml-1.5 text-[10px] bg-pos-blue text-white rounded px-1 align-middle">К{l.course}</span> : null}</span>
+                  <span><span className="text-gray-400 mr-2">{i + 1}</span>{l.name}{l.qty !== 1 && <span className="text-gray-500"> × {String(l.qty).replace('.', ',')}</span>}{l.course ? <span className="ml-1.5 text-[10px] bg-pos-blue text-white rounded px-1 align-middle">К{l.course}</span> : null}{l.discountPct ? <span className="ml-1.5 text-[10px] bg-emerald-600 text-white rounded px-1 align-middle">−{l.discountPct}%</span> : null}</span>
                   <span className="font-medium">{formatTenge(lineTotal(l))}</span>
                 </div>
                 {l.modifiers.length > 0 && (
@@ -201,6 +201,7 @@ export default function OrderScreen() {
           <div className="border-t border-gray-300 px-3 py-2 text-sm">
             {isRest && <div className="flex justify-between text-gray-500"><span>Гость {activeGuest}</span><span>{formatTenge(guestSum(activeGuest))}</span></div>}
             <div className="flex justify-between text-gray-500"><span>Скидка / Надбавка</span><span>{order.discountPct.toFixed(2)}% / {order.surchargePct.toFixed(2)}%</span></div>
+            {order.discountAmount ? <div className="flex justify-between text-gray-500"><span>Скидка суммой</span><span>− {formatTenge(order.discountAmount)}</span></div> : null}
             <div className="flex justify-between text-gray-500"><span>подытог (весь заказ)</span><span>{formatTenge(orderSubtotal(order))}</span></div>
             <div className="flex justify-between text-2xl font-bold mt-1"><span>ИТОГО</span><span>{formatTenge(orderTotal(order))}</span></div>
           </div>
@@ -351,8 +352,13 @@ export default function OrderScreen() {
           subtotal={orderSubtotal(order)}
           discountPct={order.discountPct}
           surchargePct={order.surchargePct}
+          discountAmount={order.discountAmount}
+          selLineName={selLine?.name}
+          selLineDiscount={selLine?.discountPct}
           onApplyDiscount={(pct) => pos.setDiscount(pct)}
           onApplySurcharge={(pct) => pos.setSurcharge(pct)}
+          onApplyDiscountAmount={(a) => pos.setDiscountAmount(a)}
+          onApplyLineDiscount={(pct) => selUid && pos.setLineDiscount(selUid, pct)}
           onClose={() => setShowDiscount(false)}
         />
       )}

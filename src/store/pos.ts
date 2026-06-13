@@ -259,12 +259,14 @@ export const defaultPayMode = (positions: string[]): 'salary' | 'hourly' =>
 
 export const lineUnitPrice = (l: OrderLine): number =>
   l.price + l.modifiers.reduce((s, m) => s + m.price * m.qty, 0)
-export const lineTotal = (l: OrderLine): number => lineUnitPrice(l) * l.qty
+// итог строки с учётом скидки на позицию (discountPct)
+export const lineTotal = (l: OrderLine): number => lineUnitPrice(l) * l.qty * (1 - (l.discountPct ?? 0) / 100)
 
 export const orderSubtotal = (o: Order): number => o.lines.reduce((s, l) => s + lineTotal(l), 0)
 export const orderTotal = (o: Order): number => {
   const sub = orderSubtotal(o)
-  return +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)).toFixed(2)
+  const afterPct = sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)
+  return +Math.max(0, afterPct - (o.discountAmount ?? 0)).toFixed(2)
 }
 
 // ───────────────────────────── state ─────────────────────────────
@@ -350,6 +352,8 @@ interface PosState {
   setOrderTab: (orderId: number, tabName: string | undefined) => void // барный счёт (Tab)
   setDiscount: (pct: number) => void
   setSurcharge: (pct: number) => void
+  setDiscountAmount: (amount: number) => void          // фикс-сумма скидки на заказ, ₸
+  setLineDiscount: (uid: string, pct: number) => void  // скидка на позицию, %
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -661,6 +665,13 @@ export const usePos = create<PosState>((set, get) => ({
   })),
   setSurcharge: (pct) => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, surchargePct: pct } : o)),
+  })),
+  setDiscountAmount: (amount) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, discountAmount: amount || undefined } : o)),
+  })),
+  setLineDiscount: (uid, pct) => set((st) => ({
+    orders: st.orders.map((o) => o.id === st.currentOrderId
+      ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, discountPct: pct || undefined } : l)) } : o),
   })),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),

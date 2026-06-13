@@ -92,6 +92,7 @@ export interface OrderLine {
   course?: number  // курс подачи (1/2/3…); не задан = без курса
   kitchenStatus?: 'new' | 'cooking' | 'ready' | 'served' // кухонный статус блюда (KDS)
   firedAt?: string // время отправки на кухню (ЧЧ:ММ) — для таймера/просрочки
+  discountPct?: number // скидка на позицию, % (не задан = 0)
 }
 
 export type OrderType = 'dinein' | 'takeaway' | 'delivery'
@@ -116,6 +117,7 @@ export interface Order {
   lines: OrderLine[]
   discountPct: number
   surchargePct: number
+  discountAmount?: number // фикс-сумма скидки на весь заказ, ₸ (после % скидки)
   openedAt: string
   status: 'open' | 'precheck' | 'fiscalized' | 'paid'
   tabName?: string // барный счёт (Tab): именованный открытый счёт без стола

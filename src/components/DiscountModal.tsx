@@ -7,8 +7,13 @@ interface Props {
   subtotal: number          // сумма заказа (для проверки «не менее»)
   discountPct: number
   surchargePct: number
+  discountAmount?: number    // текущая фикс-сумма скидки
+  selLineName?: string       // имя выделенной позиции (для скидки на позицию)
+  selLineDiscount?: number   // текущая скидка выделенной позиции, %
   onApplyDiscount: (pct: number) => void
   onApplySurcharge: (pct: number) => void
+  onApplyDiscountAmount?: (amount: number) => void
+  onApplyLineDiscount?: (pct: number) => void
   onClose: () => void
 }
 
@@ -22,11 +27,13 @@ const inWindow = (from?: string, to?: string) => {
 
 // Скидки/надбавки на заказ (Дисконтная система офиса → касса). Право F_ID на ручное назначение.
 // Клубная карта (topic-502): прокатка номера → скидка её типа (способ «по карте»).
-export default function DiscountModal({ subtotal, discountPct, surchargePct, onApplyDiscount, onApplySurcharge, onClose }: Props) {
+export default function DiscountModal({ subtotal, discountPct, surchargePct, discountAmount, selLineName, selLineDiscount, onApplyDiscount, onApplySurcharge, onApplyDiscountAmount, onApplyLineDiscount, onClose }: Props) {
   const { discounts, clubCards, can } = usePos()
   const canManual = can('F_ID')
   const [card, setCard] = useState('')
   const [manual, setManual] = useState('')
+  const [manualSum, setManualSum] = useState('')
+  const [lineDisc, setLineDisc] = useState('')
   const [cardMsg, setCardMsg] = useState('')
 
   // применима ли скидка сейчас: ручная + право + период + порог суммы
@@ -97,17 +104,36 @@ export default function DiscountModal({ subtotal, discountPct, surchargePct, onA
           {cardMsg && <div className="text-pos-rose text-xs mt-1">{cardMsg}</div>}
         </div>
 
-        {/* ручной процент + снятие */}
-        <div className="mt-3 flex items-end gap-2">
+        {/* ручная скидка на ЗАКАЗ: % или фикс-сумма ₸ */}
+        <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="flex flex-col text-xs text-gray-500">Своя скидка, %
-            <input value={manual} onChange={(e) => setManual(e.target.value.replace(/[^\d.]/g, ''))} disabled={!canManual} placeholder="0" className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right disabled:bg-gray-100" />
+            <input value={manual} onChange={(e) => setManual(e.target.value.replace(/[^\d.]/g, ''))} disabled={!canManual} placeholder="0" className="mt-1 h-9 w-24 rounded border border-gray-300 px-2 text-right disabled:bg-gray-100" />
           </label>
           <button disabled={!canManual} onClick={() => { onApplyDiscount(Math.min(100, parseFloat(manual) || 0)); onClose() }} className={`h-9 px-4 rounded text-sm ${canManual ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Применить %</button>
+          {onApplyDiscountAmount && (
+            <>
+              <label className="flex flex-col text-xs text-gray-500 ml-2">Скидка суммой, ₸{discountAmount ? <span className="text-emerald-600"> (сейчас −{formatTenge(discountAmount)})</span> : null}
+                <input value={manualSum} onChange={(e) => setManualSum(e.target.value.replace(/[^\d.]/g, ''))} disabled={!canManual} placeholder="0" className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right disabled:bg-gray-100" />
+              </label>
+              <button disabled={!canManual} onClick={() => { onApplyDiscountAmount(Math.max(0, parseFloat(manualSum) || 0)); onClose() }} className={`h-9 px-4 rounded text-sm ${canManual ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Применить ₸</button>
+            </>
+          )}
           <div className="ml-auto flex gap-2">
-            <button onClick={() => { onApplyDiscount(0); onClose() }} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">Снять скидку</button>
+            <button onClick={() => { onApplyDiscount(0); onApplyDiscountAmount?.(0); onClose() }} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">Снять скидку</button>
             <button onClick={() => { onApplySurcharge(0); onClose() }} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">Снять надбавку</button>
           </div>
         </div>
+
+        {/* скидка на ВЫДЕЛЕННУЮ ПОЗИЦИЮ */}
+        {selLineName && onApplyLineDiscount && (
+          <div className="mt-3 bg-white border border-gray-200 rounded p-3 flex flex-wrap items-end gap-2">
+            <div className="text-gray-500 text-xs uppercase w-full mb-1">Скидка на позицию: {selLineName}{selLineDiscount ? ` (сейчас −${selLineDiscount}%)` : ''}</div>
+            <input value={lineDisc} onChange={(e) => setLineDisc(e.target.value.replace(/[^\d.]/g, ''))} disabled={!canManual} placeholder="0" className="h-9 w-24 rounded border border-gray-300 px-2 text-right disabled:bg-gray-100" />
+            <span className="text-gray-400 text-sm">%</span>
+            <button disabled={!canManual} onClick={() => { onApplyLineDiscount(Math.min(100, parseFloat(lineDisc) || 0)); onClose() }} className={`h-9 px-4 rounded text-sm ${canManual ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Применить к позиции</button>
+            <button onClick={() => { onApplyLineDiscount(0); onClose() }} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">Снять</button>
+          </div>
+        )}
       </div>
     </div>
   )
