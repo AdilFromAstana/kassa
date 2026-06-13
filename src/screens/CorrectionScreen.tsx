@@ -13,7 +13,12 @@ const taxModes = ['ОУР (общеустановленный)', 'СНР (упр
 
 export default function CorrectionScreen() {
   const navigate = useNavigate()
-  const { fiscalSeq } = usePos()
+  const { fiscalSeq, can, hasRightFor, user, staffList } = usePos()
+  // авторизация правом F_CRCT: либо у текущего, либо прокатка карты менеджера
+  const selfOk = can('F_CRCT')
+  const managers = staffList.filter((s) => hasRightFor(s.positions, 'F_CRCT'))
+  const [manager, setManager] = useState('')
+  const by = selfOk ? (user?.name ?? '') : manager
   const [sign, setSign] = useState(signs[0])
   const [corr, setCorr] = useState(corrTypes[0])
   const [tax, setTax] = useState(taxModes[0])
@@ -26,8 +31,9 @@ export default function CorrectionScreen() {
   const total = (parseFloat(cash) || 0) + (parseFloat(card) || 0)
 
   const print = () => {
+    if (!by) { alert('Требуется авторизация правом F_CRCT'); return }
     if (total <= 0) { alert('Укажите сумму'); return }
-    printToast(`Чек коррекции отправлен через ОФД (Webkassa)\nФД №${fiscalSeq + 1} · ${sign}\nСумма: ${formatTenge(total)} · ҚҚС ${vat}%`)
+    printToast(`Чек коррекции отправлен через ОФД (Webkassa)\nФД №${fiscalSeq + 1} · ${sign}\nСумма: ${formatTenge(total)} · ҚҚС ${vat}% · ${by}`)
     navigate('/menu')
   }
 
@@ -61,10 +67,30 @@ export default function CorrectionScreen() {
           {field('Электронными (карта), ₸', <input className={inputCls} value={card} onChange={(e) => setCard(e.target.value.replace(/[^\d.]/g, ''))} placeholder="0" />)}
         </div>
         <div className="mt-4 text-lg">Итого коррекция: <b>{formatTenge(total)}</b></div>
+
+        {/* авторизация правом F_CRCT */}
+        <div className="mt-5 max-w-3xl">
+          <div className="text-sm text-white/60 mb-2">Подтверждение права (F_CRCT — чек коррекции)</div>
+          {selfOk ? (
+            <div className="text-pos-green text-sm">✓ Авторизовано: {user?.name} — право есть</div>
+          ) : (
+            <div>
+              <div className="text-pos-rose text-sm mb-2">У вас нет права на коррекцию — проведите карту менеджера:</div>
+              <div className="flex flex-wrap gap-2">
+                {managers.map((m) => (
+                  <button key={m.id} onClick={() => setManager(m.name)}
+                    className={`h-10 px-3 rounded text-sm ${manager === m.name ? 'bg-pos-accent text-gray-900' : 'bg-white/10 hover:bg-white/20'}`}>{m.name}</button>
+                ))}
+                {managers.length === 0 && <span className="text-white/40 text-sm">Нет сотрудников с правом F_CRCT</span>}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       <div className="h-16 bg-white text-gray-700 flex items-center px-4 gap-4">
         <BackButton onClick={() => navigate('/menu')} />
-        <button onClick={print} className="ml-auto h-12 px-10 rounded-md bg-pos-green text-white">Печать</button>
+        <button onClick={print} disabled={!by || total <= 0}
+          className="ml-auto h-12 px-10 rounded-md bg-pos-green text-white disabled:opacity-40 disabled:cursor-not-allowed">Печать</button>
       </div>
     </div>
   )

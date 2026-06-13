@@ -24,6 +24,7 @@ export const RIGHTS: Record<string, string> = {
   F_VRS: 'Просмотр резервов / банкетов',
   F_ERS: 'Редактирование резервов / банкетов',
   F_AOT: 'Заказы других официантов',
+  F_CRCT: 'Чек коррекции (фискальная коррекция)',
 }
 
 // Должность → набор прав ПО УМОЛЧАНИЮ (мок-модель ролей; в офисе можно переопределить).
@@ -31,9 +32,9 @@ export const RIGHTS: Record<string, string> = {
 export const POSITION_RIGHTS: Record<string, string[]> = {
   Официант: ['F_CHO', 'F_CPBA', 'F_VRS'],
   Бармен: ['F_CHO', 'F_CPBA', 'F_VRS'],
-  Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT', 'F_CHPAY'],
+  Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT', 'F_CHPAY', 'F_CRCT'],
   Менеджер: [
-    'F_EM', 'F_STRN', 'F_SWWOFF', 'F_ID', 'F_CCB', 'F_CVS', 'F_CHPAY', 'F_VRPT', 'F_ZREP', 'F_ERS', 'F_VRS', 'F_AOT',
+    'F_EM', 'F_STRN', 'F_SWWOFF', 'F_ID', 'F_CCB', 'F_CVS', 'F_CHPAY', 'F_VRPT', 'F_ZREP', 'F_ERS', 'F_VRS', 'F_AOT', 'F_CRCT',
     'F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA',
   ],
 }
