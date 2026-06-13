@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message } from '../types'
 
 // KZ Сотрудники (мок). PIN — 4 цифры (как на реальной кассе).
 export const staff: Staff[] = [
@@ -70,10 +70,10 @@ export const attendance = [
 ]
 
 // Внутренние сообщения / новости (мок).
-export const messages = [
+export const messages: Message[] = [
   { id: 1, from: 'Управляющий', date: 'Сегодня 09:30', title: 'План продаж на месяц', body: 'Целевая выручка обновлена. Акцент на кофе и десерты — мотивационная программа активна.', unread: true },
-  { id: 2, from: 'Шеф-повар', date: 'Сегодня 08:10', title: 'Стоп-лист на утро', body: 'Бесбармак временно недоступен (нет конины). Обновите при поступлении.', unread: true },
-  { id: 3, from: 'Бухгалтерия', date: 'Вчера 18:40', title: 'Переход на ҚҚС 16%', body: 'С 01.01.2026 ставка НДС 16%. Проверьте налоговые категории и Webkassa.', unread: false },
+  { id: 2, from: 'Шеф-повар', date: 'Сегодня 08:10', title: 'Стоп-лист на утро', body: 'Бесбармак временно недоступен (нет конины). Обновите при поступлении.', unread: true, important: true },
+  { id: 3, from: 'Бухгалтерия', date: 'Вчера 18:40', title: 'Переход на ҚҚС 16%', body: 'С 01.01.2026 ставка НДС 16%. Проверьте налоговые категории и Webkassa.', unread: false, important: true },
 ]
 
 export const tablesByHall = (hallId: string) => tables.filter((t) => t.hallId === hallId)

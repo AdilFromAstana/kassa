@@ -162,6 +162,16 @@ export interface Staff {
   positions: string[]
 }
 
+export interface Message {
+  id: number
+  from: string
+  date: string
+  title: string
+  body: string
+  unread: boolean
+  important?: boolean // важное сообщение — выделяется красным
+}
+
 export interface Table {
   id: string
   hallId: string

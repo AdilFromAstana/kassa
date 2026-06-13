@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import type {
-  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc,
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff,
 } from '../types'
 import { findDish } from '../mock/menu'
-import { findStaffByPin, initialBanquets } from '../mock/data'
+import { findStaffByPin, initialBanquets, messages as messagesSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -123,6 +123,7 @@ interface PosState {
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
   roleRights: Record<string, string[]> // карта должность→права (из офиса)
+  messages: Message[] // внутренние сообщения / новости
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -168,6 +169,7 @@ interface PosState {
   can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
   hasRightFor: (positions: string[] | undefined, code: string) => boolean // право для произвольных должностей
   toggleRoleRight: (position: string, code: string) => void // правка карты прав в офисе
+  markMessageRead: (id: number) => void
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
@@ -207,6 +209,7 @@ export const usePos = create<PosState>((set, get) => ({
   establishment: loadEstablishment(),
   priceOverrides: loadPriceOverrides(),
   roleRights: loadRoleRights(),
+  messages: messagesSeed.map((m) => ({ ...m })),
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -483,6 +486,7 @@ export const usePos = create<PosState>((set, get) => ({
     set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
   can: (code) => hasRightIn(get().roleRights, get().user?.positions, code),
   hasRightFor: (positions, code) => hasRightIn(get().roleRights, positions, code),
+  markMessageRead: (id) => set((st) => ({ messages: st.messages.map((m) => (m.id === id ? { ...m, unread: false } : m)) })),
   toggleRoleRight: (position, code) => set((st) => {
     const cur = st.roleRights[position] ?? []
     const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]
