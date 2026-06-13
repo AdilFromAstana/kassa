@@ -104,8 +104,10 @@ export default function PaymentScreen() {
   const total = +(sub * (1 - order!.discountPct / 100) * (1 + order!.surchargePct / 100)).toFixed(2)
   const amountOf = (id: string) => parseNum(entry[id])
   const paid = +lines.reduce((s, id) => s + amountOf(id), 0).toFixed(2)
-  const toPayLeft = Math.max(0, +(total - paid).toFixed(2)) // «ВНЕСТИ»
-  const change = Math.max(0, +(paid - total).toFixed(2))    // «СДАЧА»
+  const prepay = guestNo != null ? 0 : +(order!.prepayment ?? 0).toFixed(2) // депозит/предоплата (для всего заказа)
+  const due = Math.max(0, +(total - prepay).toFixed(2))     // к оплате гостем (за вычетом предоплаты)
+  const toPayLeft = Math.max(0, +(due - paid).toFixed(2))   // «ВНЕСТИ»
+  const change = Math.max(0, +(paid - due).toFixed(2))      // «СДАЧА»
   const fiscalSep = pos.establishment.fiscalBeforePay // 9.x: раздельная печать фискального чека перед оплатой
   const isFiscalized = order!.status === 'fiscalized'
 
@@ -133,10 +135,12 @@ export default function PaymentScreen() {
     .map((id) => ({ paymentTypeId: id, name: nameOf(id), amount: amountOf(id) }))
 
   const doPay = () => {
-    const splits = splitsNow()
+    const tenders = splitsNow()
+    // предоплата/депозит идёт отдельной строкой оплаты, чтобы сумма платежей сошлась с итогом
+    const splits = prepay > 0 ? [...tenders, { paymentTypeId: 'p-prepay', name: 'Предоплата', amount: prepay }] : tenders
     if (splits.length === 0) return
-    const used = paymentTypes.filter((p) => splits.some((s) => s.paymentTypeId === p.id))
-    const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid) : pos.pay(splits, paid)
+    const used = paymentTypes.filter((p) => tenders.some((s) => s.paymentTypeId === p.id))
+    const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid + prepay) : pos.pay(splits, paid + prepay)
     if (closed) {
       if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
       if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
@@ -194,7 +198,7 @@ export default function PaymentScreen() {
             <Tot k="ПОДЫТОГ" v={formatTenge(sub)} />
             <Tot k="СКИДКА" v={`${order!.discountPct.toFixed(2)}%`} />
             <Tot k="НАДБАВКА" v={`${order!.surchargePct.toFixed(2)}%`} />
-            <Tot k="ПРЕДОПЛАТА" v={formatTenge(0)} />
+            <Tot k="ПРЕДОПЛАТА" v={prepay > 0 ? '− ' + formatTenge(prepay) : formatTenge(0)} />
             <div className="flex justify-between px-4 py-2 text-2xl font-bold border-t border-black/30"><span>ИТОГО:</span><span>{formatTenge(total)}</span></div>
           </div>
 
@@ -238,8 +242,9 @@ export default function PaymentScreen() {
         <div className="w-[24%] bg-[#4a4f52] flex flex-col">
           <div className="flex justify-between items-baseline px-4 py-3">
             <span className="text-white/70">К ОПЛАТЕ:</span>
-            <span className="text-2xl font-bold">{formatTenge(total)}</span>
+            <span className="text-2xl font-bold">{formatTenge(due)}</span>
           </div>
+          {prepay > 0 && <div className="px-4 -mt-2 mb-1 text-xs text-pos-accent">из итога {formatTenge(total)} учтена предоплата {formatTenge(prepay)}</div>}
           {fiscalSep && isFiscalized && <div className="mx-4 mb-2 text-pos-accent text-sm">✓ Фискальный чек напечатан — примите оплату</div>}
           <div className="flex-1 overflow-auto">
             {lines.map((id) => (
@@ -301,13 +306,13 @@ export default function PaymentScreen() {
         <BarBtn onClick={() => setShowGoods(true)} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
         <BarBtn onClick={() => printToast('Чек отправлен')} Icon={Send} label="ОТПРАВКА ЧЕКА" />
         {!fiscalSep ? (
-          <button onClick={doPay} disabled={paid < total || total <= 0}
-            className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= total && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
+          <button onClick={doPay} disabled={paid < due || total <= 0}
+            className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= due && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
             ОПЛАТИТЬ
           </button>
         ) : !isFiscalized ? (
-          <button onClick={doFiscal} disabled={paid < total || total <= 0}
-            className={`ml-auto h-12 px-10 rounded-md text-xl font-light ${paid >= total && total > 0 ? 'bg-pos-accent text-gray-900' : 'text-white/30'}`}>
+          <button onClick={doFiscal} disabled={paid < due || total <= 0}
+            className={`ml-auto h-12 px-10 rounded-md text-xl font-light ${paid >= due && total > 0 ? 'bg-pos-accent text-gray-900' : 'text-white/30'}`}>
             ФИСКАЛЬНЫЙ ЧЕК
           </button>
         ) : (

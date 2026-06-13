@@ -12,7 +12,7 @@ const GRID = 'grid grid-cols-[90px_120px_140px_150px_70px_minmax(150px,1fr)_120p
 
 export default function BanquetsScreen() {
   const navigate = useNavigate()
-  const { banquets, setBanquetStatus, logout, orders, startOrder, openExistingOrder } = usePos()
+  const { banquets, setBanquetStatus, logout, orders, startOrder, openExistingOrder, setOrderPrepayment } = usePos()
   const [showBanket, setShowBanket] = useState(true)
   const [showReserv, setShowReserv] = useState(true)
   const [onlyActive, setOnlyActive] = useState(true)
@@ -30,7 +30,10 @@ export default function BanquetsScreen() {
   const openOrder = (r: typeof banquets[number]) => {
     const existing = orders.find((o) => o.tableId === r.tableId)
     if (existing) openExistingOrder(existing.id)
-    else startOrder({ tableId: r.tableId, hallId: r.hallId, guests: Math.max(1, r.guests), type: 'dinein' })
+    else {
+      const id = startOrder({ tableId: r.tableId, hallId: r.hallId, guests: Math.max(1, r.guests), type: 'dinein' })
+      if (r.prepayment > 0) setOrderPrepayment(id, r.prepayment) // депозит банкета → вычитается при оплате
+    }
     if (r.status === 'Действует') setBanquetStatus(r.id, 'Гость пришёл')
     navigate('/order')
   }

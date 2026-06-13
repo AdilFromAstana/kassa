@@ -354,6 +354,7 @@ interface PosState {
   setSurcharge: (pct: number) => void
   setDiscountAmount: (amount: number) => void          // фикс-сумма скидки на заказ, ₸
   setLineDiscount: (uid: string, pct: number) => void  // скидка на позицию, %
+  setOrderPrepayment: (orderId: number, amount: number) => void // предоплата/депозит по заказу
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -672,6 +673,9 @@ export const usePos = create<PosState>((set, get) => ({
   setLineDiscount: (uid, pct) => set((st) => ({
     orders: st.orders.map((o) => o.id === st.currentOrderId
       ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, discountPct: pct || undefined } : l)) } : o),
+  })),
+  setOrderPrepayment: (orderId, amount) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === orderId ? { ...o, prepayment: amount || undefined } : o)),
   })),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),

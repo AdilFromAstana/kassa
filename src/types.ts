@@ -118,6 +118,7 @@ export interface Order {
   discountPct: number
   surchargePct: number
   discountAmount?: number // фикс-сумма скидки на весь заказ, ₸ (после % скидки)
+  prepayment?: number     // предоплата/депозит по заказу (напр. из банкета), ₸ — вычитается из суммы к оплате
   openedAt: string
   status: 'open' | 'precheck' | 'fiscalized' | 'paid'
   tabName?: string // барный счёт (Tab): именованный открытый счёт без стола
