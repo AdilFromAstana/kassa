@@ -9,7 +9,7 @@ import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 import { todayISO, formatRu, fromISO, toISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
-import type { Establishment, PriceOrderLine, PaymentKind } from '../types'
+import type { Establishment, PriceOrderLine, PaymentKind, OrderType, VatRate } from '../types'
 
 // iikoOffice (мок бэк-офиса) — здесь редактируется конфиг заведения и меню/цены, которые «уезжают»
 // на кассу (Front). Общий стор + localStorage: изменения применяются на кассе сразу.
@@ -42,7 +42,7 @@ const NAV: { id: Section; label: string }[] = [
 ]
 const SECTION_TITLE: Record<Section, string> = {
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
-  retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания',
+  retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
 }
@@ -81,6 +81,7 @@ export default function OfficeScreen() {
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder,
     salaryPayouts, paySalary,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
+    orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
@@ -120,6 +121,7 @@ export default function OfficeScreen() {
   const [newPt, setNewPt] = useState({ name: '', kind: 'cashless' as PaymentKind, code: '' })
   const [newCo, setNewCo] = useState({ name: '', direction: 'out' as 'in' | 'out', requireComment: false, limit: '' })
   const [newReason, setNewReason] = useState('')
+  const [newOt, setNewOt] = useState({ name: '', mode: 'dinein' as OrderType, vat: 16 as VatRate })
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
   const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
@@ -518,6 +520,44 @@ export default function OfficeScreen() {
             <div className="flex items-end gap-2">
               <input value={newReason} onChange={(e) => setNewReason(e.target.value)} placeholder="Новая причина" className="h-9 rounded border border-gray-300 px-2 w-64" />
               <button onClick={() => { if (newReason.trim()) { addWriteoffReason(newReason); setNewReason('') } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm inline-flex items-center gap-1"><Plus size={14} />Добавить</button>
+            </div>
+
+            {/* Типы заказов (topic-112): режим обслуживания + налоговая категория + по умолчанию */}
+            <div className="text-gray-500 text-xs uppercase mb-2 mt-8">Типы заказов (режим обслуживания + налоговая категория)</div>
+            <div className="text-xs text-gray-400 mb-2">Аналитический признак заказа + ставка ҚҚС по типу обслуживания. «По умолчанию» — тип новых заказов на кассе.</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2">По умолч.</th><th>Название</th><th>Режим</th><th className="text-center">ҚҚС</th><th className="p-2"></th>
+                </tr></thead>
+                <tbody>
+                  {orderTypes.map((o) => (
+                    <tr key={o.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2"><input type="radio" name="ot-default" checked={!!o.isDefault} onChange={() => setDefaultOrderType(o.id)} /></td>
+                      <td><input value={o.name} onChange={(e) => updateOrderType(o.id, { name: e.target.value })} className="h-8 rounded border border-gray-200 px-2 w-56" /></td>
+                      <td className="text-gray-500 text-xs">{o.mode === 'dinein' ? 'в зале' : o.mode === 'takeaway' ? 'на вынос' : 'доставка'}</td>
+                      <td className="text-center">
+                        <select value={o.vat} onChange={(e) => updateOrderType(o.id, { vat: Number(e.target.value) as VatRate })} className="h-8 rounded border border-gray-200 px-1">
+                          <option value={16}>16%</option><option value={0}>0%</option>
+                        </select>
+                      </td>
+                      <td className="p-2 text-right">{o.isDefault ? <span className="text-gray-300 text-xs">по умолч.</span>
+                        : <button onClick={() => removeOrderType(o.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-end gap-2">
+              <input value={newOt.name} onChange={(e) => setNewOt({ ...newOt, name: e.target.value })} placeholder="Название (напр. Самовывоз)" className="h-9 rounded border border-gray-300 px-2 flex-1" />
+              <select value={newOt.mode} onChange={(e) => setNewOt({ ...newOt, mode: e.target.value as OrderType })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="dinein">В зале</option><option value="takeaway">На вынос</option><option value="delivery">Доставка</option>
+              </select>
+              <select value={newOt.vat} onChange={(e) => setNewOt({ ...newOt, vat: Number(e.target.value) as VatRate })} className="h-9 rounded border border-gray-300 px-2">
+                <option value={16}>ҚҚС 16%</option><option value={0}>ҚҚС 0%</option>
+              </select>
+              <button onClick={() => { if (newOt.name.trim()) { addOrderType({ name: newOt.name.trim(), mode: newOt.mode, vat: newOt.vat }); setNewOt({ name: '', mode: 'dinein', vat: 16 }) } }}
+                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить тип</button>
             </div>
           </div>
         ) : section === 'discount' ? (

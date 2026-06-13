@@ -96,6 +96,16 @@ export interface OrderLine {
 
 export type OrderType = 'dinein' | 'takeaway' | 'delivery'
 
+// Тип заказа (Розничные продажи → Типы заказов, topic-112): аналитический признак заказа +
+// налоговая категория (ставка ҚҚС по типу обслуживания). По умолч. один тип на режим.
+export interface OrderTypeDef {
+  id: string
+  name: string        // отображаемое имя (напр. «Обслуживание в зале»)
+  mode: OrderType     // режим обслуживания → OrderType на кассе
+  isDefault?: boolean // применять по умолчанию для новых заказов
+  vat: VatRate        // налоговая категория (ҚҚС 16%/0%) для типа
+}
+
 export interface Order {
   id: number
   tableId: string | null // null = быстрый чек

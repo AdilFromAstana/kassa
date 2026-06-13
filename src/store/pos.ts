@@ -2,12 +2,12 @@ import { create } from 'zustand'
 import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
-  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard,
+  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
   MotivationProgram, SalaryDeduction,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
-  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed } from '../mock/data'
+  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -109,6 +109,13 @@ function loadPaymentTypes(): PaymentType[] {
 }
 function persistPaymentTypes(list: PaymentType[]) {
   try { localStorage.setItem('iiko-payment-types', JSON.stringify(list)) } catch { /* ignore */ }
+}
+function loadOrderTypes(): OrderTypeDef[] {
+  try { const raw = localStorage.getItem('iiko-order-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return orderTypesSeed.map((o) => ({ ...o }))
+}
+function persistOrderTypes(list: OrderTypeDef[]) {
+  try { localStorage.setItem('iiko-order-types', JSON.stringify(list)) } catch { /* ignore */ }
 }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -256,6 +263,7 @@ interface PosState {
   priceOrderSeq: number
   salaryPayouts: SalaryPayout[] // выплаты сотрудникам (аванс/расчёт)
   salaryPayoutSeq: number
+  orderTypes: OrderTypeDef[] // типы заказов (Розничные продажи, topic-112) — режим/налог/по умолчанию
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -350,6 +358,10 @@ interface PosState {
   addPaymentType: (p: Omit<PaymentType, 'id'>) => void
   updatePaymentType: (id: string, patch: Partial<PaymentType>) => void
   removePaymentType: (id: string) => void
+  addOrderType: (o: Omit<OrderTypeDef, 'id'>) => void
+  updateOrderType: (id: string, patch: Partial<OrderTypeDef>) => void
+  removeOrderType: (id: string) => void
+  setDefaultOrderType: (id: string) => void
   addCashOpType: (c: Omit<CashOpType, 'id'>) => void
   removeCashOpType: (id: string) => void
   addWriteoffReason: (name: string) => void
@@ -420,6 +432,7 @@ export const usePos = create<PosState>((set, get) => ({
   priceOrderSeq: loadPriceOrders().length,
   salaryPayouts: loadSalary(),
   salaryPayoutSeq: loadSalary().length,
+  orderTypes: loadOrderTypes(),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -954,6 +967,28 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.paymentTypes.filter((p) => p.id !== id)
     persistPaymentTypes(list)
     return { paymentTypes: list }
+  }),
+  // Типы заказов (Розничные продажи, topic-112) → касса: режим/имя/налог/по умолчанию
+  addOrderType: (o) => set((st) => {
+    const id = 'ot-' + o.mode + '-' + (st.orderTypes.length + 1)
+    const list = [...st.orderTypes, { ...o, id }]
+    persistOrderTypes(list)
+    return { orderTypes: list }
+  }),
+  updateOrderType: (id, patch) => set((st) => {
+    const list = st.orderTypes.map((o) => (o.id === id ? { ...o, ...patch } : o))
+    persistOrderTypes(list)
+    return { orderTypes: list }
+  }),
+  removeOrderType: (id) => set((st) => {
+    const list = st.orderTypes.filter((o) => o.id !== id)
+    persistOrderTypes(list)
+    return { orderTypes: list }
+  }),
+  setDefaultOrderType: (id) => set((st) => {
+    const list = st.orderTypes.map((o) => ({ ...o, isDefault: o.id === id }))
+    persistOrderTypes(list)
+    return { orderTypes: list }
   }),
   addCashOpType: (c) => set((st) => {
     const id = (c.direction === 'in' ? 'ci-' : 'co-') + (st.cashOpTypes.length + 1)

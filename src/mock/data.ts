@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -38,6 +38,13 @@ export const tables: Table[] = [
   { id: 't-v1', hallId: 'h-veranda', no: 'В1', seats: 4, x: 0, y: 0 },
   { id: 't-v2', hallId: 'h-veranda', no: 'В2', seats: 4, x: 1, y: 0 },
   { id: 't-v3', hallId: 'h-veranda', no: 'В3', seats: 6, x: 0, y: 1 },
+]
+
+// Типы заказов (Розничные продажи → Типы заказов, topic-112). Один тип на режим, «В зале» — по умолчанию.
+export const orderTypesSeed: OrderTypeDef[] = [
+  { id: 'ot-dinein', name: 'Обслуживание в зале', mode: 'dinein', isDefault: true, vat: 16 },
+  { id: 'ot-takeaway', name: 'На вынос', mode: 'takeaway', vat: 16 },
+  { id: 'ot-delivery', name: 'Доставка', mode: 'delivery', vat: 16 },
 ]
 
 export const paymentTypes: PaymentType[] = [

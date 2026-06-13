@@ -100,7 +100,13 @@ export default function OrderScreen() {
 
   const est = pos.establishment
   const isRest = est.mode === 'restaurant' // ресторан: гости/деление/перенос/пречек; фастфуд — нет
-  const TYPE_LABEL: Record<string, string> = { dinein: 'Зал', takeaway: 'Вынос', delivery: 'Доставка' }
+  // ярлыки/типы заказов из справочника офиса (Розничные продажи → Типы заказов)
+  const defForMode = (m: typeof order.type) => pos.orderTypes.find((o) => o.mode === m && o.isDefault) ?? pos.orderTypes.find((o) => o.mode === m)
+  const TYPE_LABEL: Record<string, string> = {
+    dinein: defForMode('dinein')?.name ?? 'Зал',
+    takeaway: defForMode('takeaway')?.name ?? 'Вынос',
+    delivery: defForMode('delivery')?.name ?? 'Доставка',
+  }
   const courseList = order.lines.length ? Array.from(new Set(order.lines.map((l) => l.course).filter((c): c is number => !!c))).sort() : []
   const serveCourse = (c: number) => {
     const items = order.lines.filter((l) => l.course === c).map((l) => `${l.qty}× ${l.name}`)
@@ -404,9 +410,11 @@ export default function OrderScreen() {
           <div className="bg-white text-gray-800 rounded-lg p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
             <div className="text-lg font-semibold mb-3">Тип заказа</div>
             <div className="flex flex-col gap-2">
-              {(['dinein', 'takeaway', 'delivery'] as const).map((t) => (
-                <button key={t} onClick={() => { pos.setOrderType(order.id, t); setTypePick(false); printToast(`Тип заказа: ${TYPE_LABEL[t]}`) }}
-                  className={`h-12 rounded-md ${order.type === t ? 'bg-gray-200' : 'bg-pos-blue text-white'}`}>{TYPE_LABEL[t]}</button>
+              {pos.orderTypes.map((t) => (
+                <button key={t.id} onClick={() => { pos.setOrderType(order.id, t.mode); setTypePick(false); printToast(`Тип заказа: ${t.name}`) }}
+                  className={`h-12 rounded-md flex items-center justify-between px-4 ${order.type === t.mode ? 'bg-gray-200 text-gray-800' : 'bg-pos-blue text-white'}`}>
+                  <span>{t.name}</span><span className="text-xs opacity-70">ҚҚС {t.vat}%</span>
+                </button>
               ))}
             </div>
             <button onClick={() => setTypePick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
