@@ -61,6 +61,7 @@ export interface StopItem {
   optionId?: string    // стоп конкретного модификатора (опции), а не блюда
   name?: string        // отображаемое имя (для модификатора — название опции)
   remaining?: number   // остаток порций; undefined = полный стоп (недоступно). >0 — продаётся, тает, при 0 → стоп
+  scope?: string       // область стопа: 'all'/undefined = везде; hallId = только зал; 'terminal' = этот терминал
   byName: string       // кто внёс
   at: string           // когда (дата-время)
 }

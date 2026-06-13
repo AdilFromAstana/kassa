@@ -4,6 +4,7 @@ import BackButton from '../components/BackButton'
 import { Ban, Trash2 } from 'lucide-react'
 import { usePos, isOptionStopped } from '../store/pos'
 import { menuGroups, dishesByGroup, findDish, modifierGroups } from '../mock/menu'
+import { halls } from '../mock/data'
 import TopBar from '../components/TopBar'
 import QuantityModal from '../components/QuantityModal'
 
@@ -14,6 +15,8 @@ export default function StopListScreen() {
   const { stopList, addStop, removeStop, setStopRemaining, addStopOption, removeStopOption, clearStops, can } = usePos()
   const canEdit = can('F_EM') // «Редактировать стоп-лист и быстрое меню» — обычно у менеджера
   const [editId, setEditId] = useState<string | null>(null)
+  const [scope, setScope] = useState<string>('all') // область новых стопов: все места / зал / терминал
+  const scopeLabel = (sc?: string) => sc === 'terminal' ? 'терминал №998' : (sc && sc !== 'all' ? (halls.find((h) => h.id === sc)?.name ?? sc) : 'все места')
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
@@ -56,7 +59,7 @@ export default function StopListScreen() {
               return (
                 <div key={s.dishId} className="flex items-center gap-3 px-4 h-16 border-b border-white/10">
                   <div className="flex-1 min-w-0">
-                    <div className="truncate">{d?.name ?? s.dishId}</div>
+                    <div className="truncate">{d?.name ?? s.dishId} <span className="text-xs text-pos-accent">· {scopeLabel(s.scope)}</span></div>
                     <div className="text-xs text-white/40">{s.byName} · {s.at}</div>
                   </div>
                   <button onClick={() => setEditId(s.dishId)} disabled={!canEdit}
@@ -72,7 +75,17 @@ export default function StopListScreen() {
 
         {/* справа — меню для добавления */}
         <div className="flex-1 overflow-auto p-5">
-          <div className="text-white/50 text-sm mb-3">Нажмите блюдо, чтобы снять с продажи (полный стоп). Остаток порций задаётся слева.</div>
+          {/* область действия стопа: все места / конкретный зал / терминал */}
+          <div className="flex items-center gap-2 mb-3 text-sm">
+            <span className="text-white/50">Стоп для:</span>
+            <select value={scope} onChange={(e) => setScope(e.target.value)} disabled={!canEdit}
+              className="h-9 rounded px-2 bg-pos-card border border-white/15 text-white disabled:opacity-40">
+              <option value="all">всех мест</option>
+              <option value="terminal">терминала №998</option>
+              {halls.map((h) => <option key={h.id} value={h.id}>зал «{h.name}»</option>)}
+            </select>
+          </div>
+          <div className="text-white/50 text-sm mb-3">Нажмите блюдо, чтобы снять с продажи (полный стоп) для выбранной области. Остаток порций задаётся слева.</div>
           <div className="grid grid-cols-2 gap-5">
             {menuGroups.map((g) => {
               const items = dishesByGroup(g.id)
@@ -84,7 +97,7 @@ export default function StopListScreen() {
                     {items.map((d) => {
                       const inStop = stopList.some((s) => s.dishId === d.id)
                       return (
-                        <button key={d.id} disabled={inStop || !canEdit} onClick={() => addStop(d.id)}
+                        <button key={d.id} disabled={inStop || !canEdit} onClick={() => addStop(d.id, undefined, scope)}
                           className={`flex items-center justify-between h-11 px-3 rounded-md ${inStop || !canEdit ? 'bg-white/5 text-white/30 cursor-not-allowed' : 'bg-white/5 hover:bg-white/10'}`}>
                           <span>{d.name}</span>
                           {inStop && <span className="text-xs text-pos-rose inline-flex items-center gap-1"><Ban size={12} /> в стопе</span>}

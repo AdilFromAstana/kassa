@@ -201,7 +201,7 @@ export default function OrderScreen() {
                     <button key={g.id} className="tile tile-group" onClick={() => setGroupId(g.id)}>{g.name}</button>
                   ))
                 : dishesByGroup(groupId).map((d) => {
-                    const manualStop = isStopped(pos.stopList, d.id)
+                    const manualStop = isStopped(pos.stopList, d.id, order.hallId)
                     const max = dishMaxPortions(d.id, pos.ingredients, pos.techCardOverrides) // ∞ — без техкарты
                     const outOfStock = max <= 0
                     const stopped = manualStop || outOfStock

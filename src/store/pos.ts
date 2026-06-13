@@ -12,8 +12,11 @@ import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
-export const isStopped = (stopList: StopItem[], dishId: string) =>
-  stopList.some((s) => s.dishId === dishId && !s.optionId && (s.remaining === undefined || s.remaining <= 0))
+// область стопа применяется к текущему месту: везде ('all'/нет) / этот терминал / конкретный зал
+export const stopApplies = (s: StopItem, hallId?: string | null) =>
+  !s.scope || s.scope === 'all' || s.scope === 'terminal' || s.scope === hallId
+export const isStopped = (stopList: StopItem[], dishId: string, hallId?: string | null) =>
+  stopList.some((s) => s.dishId === dishId && !s.optionId && (s.remaining === undefined || s.remaining <= 0) && stopApplies(s, hallId))
 
 // Стоп конкретного модификатора (опции) — блокирует выбор опции в окне модификаторов.
 export const isOptionStopped = (stopList: StopItem[], optionId: string) =>
@@ -307,7 +310,7 @@ interface PosState {
   addBanquet: (b: Omit<Banquet, 'id' | 'status'>) => void
   updateBanquet: (id: number, patch: Partial<Banquet>) => void
   setBanquetStatus: (id: number, status: BanquetStatus) => void
-  addStop: (dishId: string, remaining?: number) => void
+  addStop: (dishId: string, remaining?: number, scope?: string) => void
   removeStop: (dishId: string) => void
   setStopRemaining: (dishId: string, remaining: number) => void
   addStopOption: (optionId: string, name: string) => void // стоп модификатора (опции)
@@ -735,10 +738,10 @@ export const usePos = create<PosState>((set, get) => ({
   setBanquetStatus: (id, status) =>
     set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, status } : b)) })),
 
-  addStop: (dishId, remaining) =>
+  addStop: (dishId, remaining, scope) =>
     set((st) => (st.stopList.some((s) => s.dishId === dishId)
       ? st
-      : { stopList: [...st.stopList, { dishId, remaining, byName: st.user?.name ?? '—', at: fullNow() }] })),
+      : { stopList: [...st.stopList, { dishId, remaining, scope, byName: st.user?.name ?? '—', at: fullNow() }] })),
   removeStop: (dishId) =>
     set((st) => ({ stopList: st.stopList.filter((s) => s.dishId !== dishId) })),
   setStopRemaining: (dishId, remaining) =>
