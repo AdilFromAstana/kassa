@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type {
-  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message,
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff,
 } from '../types'
@@ -48,6 +48,12 @@ function loadEstablishment(): Establishment {
 // Ценовые оверрайды меню (правятся в офисе → касса применяет). dishId → цена ₸.
 function loadPriceOverrides(): Record<string, number> {
   try { const raw = localStorage.getItem('iiko-menu-prices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+
+// Оверрайды техкарт из офиса (dishId → закладка). Касса списывает по ним.
+function loadTechCards(): Record<string, TechCardItem[]> {
+  try { const raw = localStorage.getItem('iiko-techcards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
 
@@ -122,6 +128,7 @@ interface PosState {
   ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
+  techCardOverrides: Record<string, TechCardItem[]> // техкарты из офиса (dishId → закладка)
   roleRights: Record<string, string[]> // карта должность→права (из офиса)
   messages: Message[] // внутренние сообщения / новости
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
@@ -174,6 +181,7 @@ interface PosState {
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
   setDishPrice: (dishId: string, price: number) => void  // правка цены в офисе
+  setTechCard: (dishId: string, items: TechCardItem[]) => void // правка техкарты в офисе
 
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
@@ -208,6 +216,7 @@ export const usePos = create<PosState>((set, get) => ({
   ingredients: loadIngredients(),
   establishment: loadEstablishment(),
   priceOverrides: loadPriceOverrides(),
+  techCardOverrides: loadTechCards(),
   roleRights: loadRoleRights(),
   messages: messagesSeed.map((m) => ({ ...m })),
   demoAuto: DEMO_AUTO,
@@ -347,7 +356,7 @@ export const usePos = create<PosState>((set, get) => ({
     }
     set((st) => {
       // списание ингредиентов по техкарте (аналог Акта реализации iiko)
-      const ingredients = applyWriteoff(st.ingredients, o.lines)
+      const ingredients = applyWriteoff(st.ingredients, o.lines, st.techCardOverrides)
       persistIngredients(ingredients)
       return {
         closedOrders: [closed, ...st.closedOrders],
@@ -376,7 +385,7 @@ export const usePos = create<PosState>((set, get) => ({
     }
     set((st) => {
       // списываем только оплаченные позиции гостя
-      const ingredients = applyWriteoff(st.ingredients, mine)
+      const ingredients = applyWriteoff(st.ingredients, mine, st.techCardOverrides)
       persistIngredients(ingredients)
       return {
         closedOrders: [closed, ...st.closedOrders],
@@ -428,7 +437,7 @@ export const usePos = create<PosState>((set, get) => ({
     }
     set((st) => {
       // «со списанием на склад» — возвращаем ингредиенты возвращённых позиций в остаток
-      const ingredients = opts.restock ? applyRestock(st.ingredients, returnedLines) : st.ingredients
+      const ingredients = opts.restock ? applyRestock(st.ingredients, returnedLines, st.techCardOverrides) : st.ingredients
       if (opts.restock) persistIngredients(ingredients)
       // в моке уменьшаем сумму чека на возвращённое (полный возврат → 0) — и в текущих, и в архиве
       const upd = (o: ClosedOrder) => o.fiscalDocNo === receiptNo ? { ...o, total: full ? 0 : +(o.total - amount).toFixed(2) } : o
@@ -524,6 +533,11 @@ export const usePos = create<PosState>((set, get) => ({
     const next = { ...st.priceOverrides, [dishId]: price }
     try { localStorage.setItem('iiko-menu-prices', JSON.stringify(next)) } catch { /* ignore */ }
     return { priceOverrides: next }
+  }),
+  setTechCard: (dishId, items) => set((st) => {
+    const next = { ...st.techCardOverrides, [dishId]: items }
+    try { localStorage.setItem('iiko-techcards', JSON.stringify(next)) } catch { /* ignore */ }
+    return { techCardOverrides: next }
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {

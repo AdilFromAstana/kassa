@@ -109,16 +109,16 @@ const byId = (ings: Ingredient[]) => {
 }
 
 // Себестоимость блюда из техкарты (₸). 0 — если техкарты нет (услуга).
-export function dishCost(dishId: string, ings: Ingredient[]): number {
-  const card = techCards[dishId]
+export function dishCost(dishId: string, ings: Ingredient[], over?: Record<string, TechCardItem[]>): number {
+  const card = over?.[dishId] ?? techCards[dishId]
   if (!card) return 0
   const m = byId(ings)
   return +card.reduce((s, it) => s + it.gross * (m[it.ingredientId]?.costPerUnit ?? 0), 0).toFixed(2)
 }
 
 // Сколько порций блюда можно собрать из текущих остатков. Infinity — если техкарты нет.
-export function dishMaxPortions(dishId: string, ings: Ingredient[]): number {
-  const card = techCards[dishId]
+export function dishMaxPortions(dishId: string, ings: Ingredient[], over?: Record<string, TechCardItem[]>): number {
+  const card = over?.[dishId] ?? techCards[dishId]
   if (!card || card.length === 0) return Infinity
   const m = byId(ings)
   let min = Infinity
@@ -135,11 +135,12 @@ export function dishMaxPortions(dishId: string, ings: Ingredient[]): number {
 // норма модификатора умножается на его количество и на количество блюда.
 // Дельта расхода ингредиентов по строкам (блюдо по техкарте + модификаторы,
 // норма модификатора × его количество × количество блюда).
-function consumptionDelta(lines: OrderLine[]): Record<string, number> {
+// over — оверрайды техкарт из офиса (dishId → закладка). Если нет — берётся базовая техкарта.
+function consumptionDelta(lines: OrderLine[], over?: Record<string, TechCardItem[]>): Record<string, number> {
   const delta: Record<string, number> = {}
   const add = (id: string, g: number) => { delta[id] = +((delta[id] ?? 0) + g).toFixed(4) }
   for (const l of lines) {
-    for (const it of techCards[l.dishId] ?? []) add(it.ingredientId, it.gross * l.qty)
+    for (const it of (over?.[l.dishId] ?? techCards[l.dishId]) ?? []) add(it.ingredientId, it.gross * l.qty)
     for (const m of l.modifiers) {
       for (const it of modifierTechCards[m.optionId] ?? []) add(it.ingredientId, it.gross * (m.qty || 1) * l.qty)
     }
@@ -147,14 +148,14 @@ function consumptionDelta(lines: OrderLine[]): Record<string, number> {
   return delta
 }
 
-export function applyWriteoff(ings: Ingredient[], lines: OrderLine[]): Ingredient[] {
-  const delta = consumptionDelta(lines)
+export function applyWriteoff(ings: Ingredient[], lines: OrderLine[], over?: Record<string, TechCardItem[]>): Ingredient[] {
+  const delta = consumptionDelta(lines, over)
   return ings.map((i) => (delta[i.id] ? { ...i, stock: +(i.stock - delta[i.id]).toFixed(3) } : i))
 }
 
 // Возврат ингредиентов на склад («возврат со списанием на склад» — товар вернулся в остаток).
-export function applyRestock(ings: Ingredient[], lines: OrderLine[]): Ingredient[] {
-  const delta = consumptionDelta(lines)
+export function applyRestock(ings: Ingredient[], lines: OrderLine[], over?: Record<string, TechCardItem[]>): Ingredient[] {
+  const delta = consumptionDelta(lines, over)
   return ings.map((i) => (delta[i.id] ? { ...i, stock: +(i.stock + delta[i.id]).toFixed(3) } : i))
 }
 

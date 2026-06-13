@@ -187,7 +187,7 @@ export default function OrderScreen() {
                   ))
                 : dishesByGroup(groupId).map((d) => {
                     const manualStop = isStopped(pos.stopList, d.id)
-                    const max = dishMaxPortions(d.id, pos.ingredients) // ∞ — без техкарты
+                    const max = dishMaxPortions(d.id, pos.ingredients, pos.techCardOverrides) // ∞ — без техкарты
                     const outOfStock = max <= 0
                     const stopped = manualStop || outOfStock
                     const low = !stopped && max !== Infinity && max <= 5

@@ -37,8 +37,10 @@ const NAV: { id: Section | null; label: string }[] = [
 export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
-    ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents } = usePos()
+    ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
+    techCardOverrides, setTechCard } = usePos()
   const [section, setSection] = useState<Section>('settings')
+  const [editDish, setEditDish] = useState('')
 
   // сводка для раздела «Отчёты»
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
@@ -241,26 +243,42 @@ export default function OfficeScreen() {
               </table>
             </div>
 
-            <div className="text-gray-500 text-xs uppercase mb-2">Техкарты (только просмотр)</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
-                  <th className="p-2 font-medium">Блюдо</th><th className="p-2 font-medium text-right">Себест.</th><th className="p-2 font-medium text-right">Доступно</th><th className="p-2 font-medium">Состав (на порцию)</th>
-                </tr></thead>
-                <tbody>
-                  {dishes.filter((d) => techCards[d.id]).map((d) => {
-                    const m = dishMaxPortions(d.id, ingredients)
-                    return (
-                      <tr key={d.id} className="border-b border-gray-100 last:border-0 align-top">
-                        <td className="p-2">{d.name}</td>
-                        <td className="p-2 text-right">{formatTenge(dishCost(d.id, ingredients))}</td>
-                        <td className="p-2 text-right">{m === Infinity ? '∞' : m}</td>
-                        <td className="p-2 text-gray-500 text-xs">{techCards[d.id].map((it) => { const ing = ingredients.find((x) => x.id === it.ingredientId); return ing ? `${ing.name} ${it.gross} ${ing.unit}` : it.ingredientId }).join(' · ')}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="text-gray-500 text-xs uppercase mb-2">Техкарты (редактирование)</div>
+            <div className="bg-white border border-gray-200 rounded-md p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-gray-500">Блюдо:</span>
+                <select value={editDish} onChange={(e) => setEditDish(e.target.value)} className="h-9 rounded border border-gray-300 px-2">
+                  <option value="">— выберите —</option>
+                  {dishes.filter((d) => techCards[d.id] || techCardOverrides[d.id]).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+                {editDish && <span className="ml-auto text-sm text-gray-400">Себест.: {formatTenge(dishCost(editDish, ingredients, techCardOverrides))} · доступно: {(() => { const m = dishMaxPortions(editDish, ingredients, techCardOverrides); return m === Infinity ? '∞' : m })()}</span>}
+              </div>
+              {!editDish ? <div className="text-gray-400 text-sm">Выберите блюдо для правки рецепта. Изменения сразу влияют на списание со склада на кассе.</div> : (() => {
+                const card = techCardOverrides[editDish] ?? techCards[editDish] ?? []
+                return (
+                  <div>
+                    {card.map((it, idx) => {
+                      const ing = ingredients.find((x) => x.id === it.ingredientId)
+                      return (
+                        <div key={idx} className="flex items-center gap-2 mb-2">
+                          <select value={it.ingredientId} onChange={(e) => setTechCard(editDish, card.map((c, i) => i === idx ? { ...c, ingredientId: e.target.value } : c))}
+                            className="h-9 rounded border border-gray-300 px-2 flex-1">
+                            {ingredients.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.unit})</option>)}
+                          </select>
+                          <input type="number" step="0.001" min={0} value={it.gross}
+                            onChange={(e) => setTechCard(editDish, card.map((c, i) => i === idx ? { ...c, gross: Math.max(0, parseFloat(e.target.value) || 0) } : c))}
+                            className="w-24 h-9 rounded border border-gray-300 px-2 text-right" />
+                          <span className="text-gray-400 text-sm w-8">{ing?.unit}</span>
+                          <button onClick={() => setTechCard(editDish, card.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500" title="Убрать">✕</button>
+                        </div>
+                      )
+                    })}
+                    {card.length === 0 && <div className="text-gray-400 text-sm mb-2">Пустая техкарта (блюдо ничего не списывает).</div>}
+                    <button onClick={() => setTechCard(editDish, [...card, { ingredientId: ingredients[0].id, gross: 0.1 }])}
+                      className="h-9 px-3 rounded bg-emerald-500 text-white text-sm">+ Ингредиент</button>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         ) : (
