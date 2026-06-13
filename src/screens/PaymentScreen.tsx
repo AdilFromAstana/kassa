@@ -27,6 +27,10 @@ export default function PaymentScreen() {
   const [receipt, setReceipt] = useState<ClosedOrder | null>(null)
   const [send, setSend] = useState<'email' | 'sms' | null>(null) // отправка чека
   const [sendTo, setSendTo] = useState('')
+  // доставка: курьер, оплата при получении / предоплата, сдача курьеру
+  const [courier, setCourier] = useState('')
+  const [changeFrom, setChangeFrom] = useState('')
+  const [prepaid, setPrepaid] = useState(false)
 
   const paymentTypes = pos.paymentTypes
   const tabs = paymentTypes.filter((p) => p.active)
@@ -135,6 +139,7 @@ export default function PaymentScreen() {
     if (closed) {
       if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
       if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
+      if (order!.type === 'delivery') printToast(`Доставка${courier ? ` · курьер ${courier}` : ''} · ${prepaid ? 'предоплачено' : 'оплата при получении'}`)
       setReceipt(closed)
     }
   }
@@ -191,6 +196,41 @@ export default function PaymentScreen() {
             <Tot k="ПРЕДОПЛАТА" v={formatTenge(0)} />
             <div className="flex justify-between px-4 py-2 text-2xl font-bold border-t border-black/30"><span>ИТОГО:</span><span>{formatTenge(total)}</span></div>
           </div>
+
+          {/* доставка: курьер + предоплата/при получении + сдача курьеру */}
+          {order!.type === 'delivery' && (
+            <div className="bg-[#2f3a45] text-white/90 text-sm p-3 space-y-2">
+              <div className="text-pos-accent uppercase text-xs">Доставка</div>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-white/60">Курьер</span>
+                <select value={courier} onChange={(e) => setCourier(e.target.value)} className="h-8 rounded px-1 text-gray-800 max-w-[55%]">
+                  <option value="">— выбрать —</option>
+                  {pos.staffList.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
+              </label>
+              <div className="flex gap-2">
+                {([['false', 'При получении'], ['true', 'Предоплата']] as const).map(([v, label]) => (
+                  <button key={v} onClick={() => setPrepaid(v === 'true')}
+                    className={`flex-1 h-9 rounded text-xs ${prepaid === (v === 'true') ? 'bg-pos-accent text-gray-900' : 'bg-white/10'}`}>{label}</button>
+                ))}
+              </div>
+              {!prepaid && (
+                <>
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-white/60">Сдача с</span>
+                    <input value={changeFrom} onChange={(e) => setChangeFrom(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" placeholder="0"
+                      className="h-8 w-28 rounded px-2 text-gray-800 text-right" />
+                  </label>
+                  {parseNum(changeFrom) > 0 && (
+                    <div className={`flex justify-between ${parseNum(changeFrom) >= total ? 'text-pos-green' : 'text-pos-rose'}`}>
+                      <span>Сдача курьеру:</span><b>{parseNum(changeFrom) >= total ? formatTenge(parseNum(changeFrom) - total) : 'не хватает'}</b>
+                    </div>
+                  )}
+                </>
+              )}
+              {prepaid && <div className="text-pos-green text-xs">Заказ предоплачен онлайн — курьер деньги не принимает.</div>}
+            </div>
+          )}
         </div>
 
         {/* ЦЕНТР: к оплате + плитки оплат + внесено/внести/сдача */}
