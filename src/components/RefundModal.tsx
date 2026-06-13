@@ -20,13 +20,15 @@ export default function RefundModal({
   title: string
   amount?: number // фиксированная сумма (когда позиции выбраны снаружи)
   lines?: RefundLine[] // если заданы — модалка сама даёт выбрать позиции (частичный возврат)
-  onConfirm: (opts: { reason: string; restock: boolean; by: string; uids?: string[] | 'all' }) => void
+  onConfirm: (opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card'; uids?: string[] | 'all' }) => void
   onCancel: () => void
 }) {
   const user = usePos((s) => s.user)
   const hasRightFor = usePos((s) => s.hasRightFor)
+  const cashInDrawer = usePos((s) => s.cashInDrawer)
   const [reason, setReason] = useState('')
   const [restock, setRestock] = useState(false)
+  const [method, setMethod] = useState<'cash' | 'card'>('cash')
   const [manager, setManager] = useState('') // карта менеджера, если у текущего юзера нет права
   const [picked, setPicked] = useState<Record<string, boolean>>(
     () => Object.fromEntries((lines ?? []).map((l) => [l.uid, true])))
@@ -38,10 +40,12 @@ export default function RefundModal({
 
   const pickedUids = (lines ?? []).filter((l) => picked[l.uid]).map((l) => l.uid)
   const sum = lines ? lines.filter((l) => picked[l.uid]).reduce((s, l) => s + l.total, 0) : (amount ?? 0)
-  const ready = reason !== '' && by !== '' && (!lines || pickedUids.length > 0)
+  const drawer = cashInDrawer()
+  const cashShort = method === 'cash' && sum > drawer
+  const ready = reason !== '' && by !== '' && (!lines || pickedUids.length > 0) && !cashShort
 
   const confirm = () => onConfirm({
-    reason, restock, by,
+    reason, restock, by, method,
     uids: lines ? (pickedUids.length === lines.length ? 'all' : pickedUids) : undefined,
   })
 
@@ -85,6 +89,20 @@ export default function RefundModal({
               <span className="text-white/40 text-sm"> ({restock ? 'со списанием на склад · F_STRN' : 'без списания · F_SWWOFF'})</span>
             </span>
           </label>
+
+          {/* способ возврата денег */}
+          <div>
+            <div className="text-white/60 text-sm mb-2">Способ возврата</div>
+            <div className="flex gap-2">
+              {(['cash', 'card'] as const).map((m) => (
+                <button key={m} onClick={() => setMethod(m)}
+                  className={`h-10 px-4 rounded text-sm ${method === m ? 'bg-pos-accent text-gray-900' : 'bg-white/10 hover:bg-white/20'}`}>
+                  {m === 'cash' ? 'Наличные' : 'Карта'}
+                </button>
+              ))}
+            </div>
+            {cashShort && <div className="text-pos-rose text-sm mt-2">Недостаточно наличных в ящике: доступно {formatTenge(drawer)}. Выберите «Карта» или внесите деньги.</div>}
+          </div>
 
           {/* авторизация по праву */}
           <div>

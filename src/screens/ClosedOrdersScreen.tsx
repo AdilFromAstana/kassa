@@ -30,7 +30,7 @@ export default function ClosedOrdersScreen() {
     if (!order) return
     setRefundReq({ uids: 'all', amount: order.total, title: 'Полный возврат' })
   }
-  const confirmRefund = (opts: { reason: string; restock: boolean; by: string }) => {
+  const confirmRefund = (opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card'; uids?: string[] | 'all' }) => {
     if (!order || !refundReq) return
     const r = refundOrder(order.fiscalDocNo, refundReq.uids, opts)
     if (r) {

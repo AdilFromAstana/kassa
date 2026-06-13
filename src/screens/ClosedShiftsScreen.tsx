@@ -16,7 +16,7 @@ export default function ClosedShiftsScreen() {
   const [refundReq, setRefundReq] = useState<{ receiptNo: string; title: string; lines: { uid: string; name: string; qty: number; total: number }[] } | null>(null)
   const shift = closedShifts.find((s) => s.no === selNo) ?? null
   const isRefunded = (orderId: number) => refunds.some((r) => r.orderId === orderId)
-  const confirmRefund = (opts: { reason: string; restock: boolean; by: string; uids?: string[] | 'all' }) => {
+  const confirmRefund = (opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card'; uids?: string[] | 'all' }) => {
     if (!refundReq) return
     const r = refundOrder(refundReq.receiptNo, opts.uids ?? 'all', opts)
     if (r) printToast(`Возвратный чек №${r.fiscalDocNo} на ${formatTenge(r.amount)} (Webkassa)\nПричина: ${opts.reason}${opts.restock ? ' · на склад' : ''} · ${opts.by}`)

@@ -238,6 +238,7 @@ export interface Refund {
   lineUids: string[] // какие позиции вернули (для частичного)
   reason: string     // причина возврата
   restock: boolean   // вернуть товар на склад (возврат со списанием на склад)
+  method: 'cash' | 'card' // способ возврата денег (наличные требуют наличия в ящике)
   at: string
   by: string         // кто авторизовал (право F_STRN / F_SWWOFF)
 }

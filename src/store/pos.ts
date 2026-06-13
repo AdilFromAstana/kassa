@@ -164,7 +164,8 @@ interface PosState {
 
   // деньги, возвраты, перенос, банкеты
   addCashMovement: (kind: 'in' | 'out', type: string, amount: number, comment: string) => void
-  refundOrder: (receiptNo: string, lineUids: string[] | 'all', opts: { reason: string; restock: boolean; by: string }) => Refund | null
+  refundOrder: (receiptNo: string, lineUids: string[] | 'all', opts: { reason: string; restock: boolean; by: string; method: 'cash' | 'card' }) => Refund | null
+  cashInDrawer: () => number // наличные в денежном ящике (для проверки возврата наличными)
   changePaymentType: (receiptNo: string, payments: PaymentSplit[]) => void
   moveOrderToTable: (orderId: number, tableId: string, hallId: string) => void
   mergeOrderInto: (sourceId: number, targetId: number) => void
@@ -432,7 +433,7 @@ export const usePos = create<PosState>((set, get) => ({
       orderId: closed.id,
       fiscalDocNo: String(get().fiscalSeq + 1),
       amount, full, lineUids: uids,
-      reason: opts.reason, restock: opts.restock,
+      reason: opts.reason, restock: opts.restock, method: opts.method,
       at: fullNow(), by: opts.by,
     }
     set((st) => {
@@ -494,6 +495,14 @@ export const usePos = create<PosState>((set, get) => ({
   setStopRemaining: (dishId, remaining) =>
     set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
   can: (code) => hasRightIn(get().roleRights, get().user?.positions, code),
+  cashInDrawer: () => {
+    const st = get()
+    const cashIn = st.cashMovements.filter((m) => m.kind === 'in').reduce((s, m) => s + m.amount, 0)
+    const cashOut = st.cashMovements.filter((m) => m.kind === 'out').reduce((s, m) => s + m.amount, 0)
+    const cashPaid = st.closedOrders.reduce((s, o) => s + o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((a, p) => a + p.amount, 0), 0)
+    const cashRefunds = st.refunds.filter((r) => r.method !== 'card').reduce((s, r) => s + r.amount, 0)
+    return +(cashIn + cashPaid - cashOut - cashRefunds).toFixed(2)
+  },
   hasRightFor: (positions, code) => hasRightIn(get().roleRights, positions, code),
   markMessageRead: (id) => set((st) => ({ messages: st.messages.map((m) => (m.id === id ? { ...m, unread: false } : m)) })),
   toggleRoleRight: (position, code) => set((st) => {
