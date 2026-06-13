@@ -27,7 +27,7 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'journal'
+type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
@@ -38,6 +38,7 @@ const NAV: { id: Section; label: string }[] = [
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
   { id: 'payroll', label: 'Зарплата (KZ)' },
+  { id: 'finance', label: 'Финансы (касс. книга / ДДС)' },
   { id: 'reports', label: 'Отчёты' },
   { id: 'journal', label: 'Журнал событий' },
 ]
@@ -46,6 +47,7 @@ const SECTION_TITLE: Record<Section, string> = {
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
+  finance: 'Финансы — кассовая книга и ДДС (движение денежных средств)',
   journal: 'Журнал событий — монитор операций',
 }
 
@@ -70,9 +72,9 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'staff', 'stock', 'accounting', 'payroll', 'reports', 'journal'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'stock', 'accounting', 'payroll', 'reports', 'journal'],
-  'Бухгалтер': ['accounting', 'payroll', 'reports', 'stock'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Бухгалтер': ['accounting', 'payroll', 'finance', 'reports', 'stock'],
 }
 
 export default function OfficeScreen() {
@@ -82,7 +84,7 @@ export default function OfficeScreen() {
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
     techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder, applyDuePriceOrders,
-    salaryPayouts, paySalary, cashMovements, writeOffs,
+    salaryPayouts, paySalary, cashMovements, writeOffs, cashShift,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
@@ -128,6 +130,7 @@ export default function OfficeScreen() {
   const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
   const [newCat, setNewCat] = useState('')
   const [journalCat, setJournalCat] = useState<string>('all') // фильтр журнала событий
+  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow'>('book')
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
   const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
@@ -1246,6 +1249,76 @@ export default function OfficeScreen() {
               )}
             </div>
           </div>
+        ) : section === 'finance' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-4">
+              Финансы (Phase 7). <b>Кассовая книга</b> — хронология наличных операций с остатком; <b>ДДС</b> — притоки/оттоки денежных средств.
+              Источник — наличные продажи, внесения/изъятия (вкл. инкассацию и выплаты ЗП), возвраты наличными, разменный фонд смены.
+            </div>
+            <div className="flex gap-1 mb-4 border-b border-gray-200">
+              {([['book', 'Кассовая книга'], ['cashflow', 'ДДС (приток/отток)']] as const).map(([id, label]) => (
+                <button key={id} onClick={() => setFinanceTab(id)}
+                  className={`px-4 h-10 text-sm -mb-px border-b-2 ${financeTab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
+              ))}
+            </div>
+            {(() => {
+              const opening = cashShift?.openingCash ?? 0
+              const cashSalesRows = closedOrders.map((o) => ({ at: o.paidAt, label: `Продажа · чек №${o.id} (нал.)`, in: o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((s, p) => s + p.amount, 0), out: 0 })).filter((r) => r.in > 0)
+              const mvRows = cashMovements.map((m) => ({ at: m.at, label: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}${m.comment ? ' · ' + m.comment : ''}`, in: m.kind === 'in' ? m.amount : 0, out: m.kind === 'out' ? m.amount : 0 }))
+              const refundRows = refunds.filter((r) => r.method === 'cash').map((r) => ({ at: r.at, label: `Возврат нал. · заказ №${r.orderId}`, in: 0, out: r.amount }))
+              const parseAt = (s: string) => { const m = /(\d{2})\.(\d{2})\.(\d{4}),?\s*(\d{2}):(\d{2})(?::(\d{2}))?/.exec(s); return m ? `${m[3]}${m[2]}${m[1]}${m[4]}${m[5]}${m[6] ?? '00'}` : s }
+              const rows = [...cashSalesRows, ...mvRows, ...refundRows].sort((a, b) => parseAt(a.at).localeCompare(parseAt(b.at)))
+              const cashSales = cashSalesRows.reduce((s, r) => s + r.in, 0)
+              const cashIn = cashMovements.filter((m) => m.kind === 'in').reduce((s, m) => s + m.amount, 0)
+              const cashOut = cashMovements.filter((m) => m.kind === 'out').reduce((s, m) => s + m.amount, 0)
+              const refundsCash = refundRows.reduce((s, r) => s + r.out, 0)
+              const closing = +(opening + cashSales + cashIn - cashOut - refundsCash).toFixed(2)
+              if (!cashShift) return <div className="text-gray-400 text-sm">Кассовая смена закрыта — нет операций. Откройте смену на кассе.</div>
+              if (financeTab === 'book') {
+                let bal = opening
+                return (
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Время</th><th>Операция</th><th className="text-right">Приход</th><th className="text-right">Расход</th><th className="text-right p-2">Остаток</th></tr></thead>
+                      <tbody>
+                        <tr className="border-b border-gray-50"><td className="p-2 text-gray-400 text-xs">{cashShift.openedAt}</td><td>Разменный фонд (начало смены №{cashShift.no})</td><td className="text-right">{formatTenge(opening)}</td><td></td><td className="text-right p-2 font-medium">{formatTenge(opening)}</td></tr>
+                        {rows.map((r, i) => { bal = +(bal + r.in - r.out).toFixed(2); return (
+                          <tr key={i} className="border-b border-gray-50 last:border-0">
+                            <td className="p-2 text-gray-400 text-xs whitespace-nowrap">{r.at}</td><td>{r.label}</td>
+                            <td className="text-right text-emerald-700">{r.in ? formatTenge(r.in) : ''}</td>
+                            <td className="text-right text-rose-700">{r.out ? formatTenge(r.out) : ''}</td>
+                            <td className="text-right p-2 font-medium">{formatTenge(bal)}</td>
+                          </tr>
+                        )})}
+                      </tbody>
+                      <tfoot><tr className="border-t border-gray-200 font-semibold"><td className="p-2" colSpan={4}>Остаток наличных в кассе</td><td className="text-right p-2">{formatTenge(closing)}</td></tr></tfoot>
+                    </table>
+                  </div>
+                )
+              }
+              return (
+                <div className="grid grid-cols-2 gap-4 max-w-2xl">
+                  <div className="bg-white border border-gray-200 rounded-md p-4">
+                    <div className="text-emerald-700 text-sm font-medium mb-2">Притоки</div>
+                    <FinRow k="Наличные продажи" v={formatTenge(cashSales)} />
+                    <FinRow k="Внесения" v={formatTenge(cashIn)} />
+                    <FinRow k="Итого приток" v={formatTenge(cashSales + cashIn)} b />
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-md p-4">
+                    <div className="text-rose-700 text-sm font-medium mb-2">Оттоки</div>
+                    <FinRow k="Изъятия (вкл. инкассацию, ЗП)" v={formatTenge(cashOut)} />
+                    <FinRow k="Возвраты наличными" v={formatTenge(refundsCash)} />
+                    <FinRow k="Итого отток" v={formatTenge(cashOut + refundsCash)} b />
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded-md p-4 col-span-2">
+                    <FinRow k="Разменный фонд (начало)" v={formatTenge(opening)} />
+                    <FinRow k="Чистый денежный поток" v={formatTenge(+(cashSales + cashIn - cashOut - refundsCash).toFixed(2))} />
+                    <FinRow k="Остаток наличных (конец)" v={formatTenge(closing)} b />
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
         ) : section === 'journal' ? (
           <div className="p-6 max-w-4xl">
             <div className="text-xs text-gray-500 mb-4">
@@ -1306,4 +1379,7 @@ const OfficeStat = ({ label, value }: { label: string; value: string }) => (
     <div className="text-xs text-gray-400">{label}</div>
     <div className="text-xl font-bold text-gray-800">{value}</div>
   </div>
+)
+const FinRow = ({ k, v, b }: { k: string; v: string; b?: boolean }) => (
+  <div className={`flex justify-between py-0.5 text-sm ${b ? 'font-semibold border-t border-gray-200 mt-1 pt-1' : 'text-gray-600'}`}><span>{k}</span><span>{v}</span></div>
 )
