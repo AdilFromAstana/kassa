@@ -34,7 +34,13 @@ export default function PaymentScreen() {
   const [showGoods, setShowGoods] = useState(false) // товарный (нефискальный) чек
 
   const paymentTypes = pos.paymentTypes
-  const tabs = paymentTypes.filter((p) => p.active)
+  // iikoCard: привязанная карта гостя → добавляем вкладку «Бонусная карта» (списание бонусов)
+  const loyaltyCard = pos.loyaltyCards.find((c) => c.id === order?.loyaltyCardId)
+  const bonusActive = pos.loyaltyProgram.active && !!loyaltyCard && guestNo == null
+  const bonusType = paymentTypes.find((p) => p.id === 'p-bonus')
+  const tabs = bonusActive && bonusType
+    ? [...paymentTypes.filter((p) => p.active && p.id !== 'p-bonus'), bonusType]
+    : paymentTypes.filter((p) => p.active)
   const nameOf = (id: string) => paymentTypes.find((p) => p.id === id)?.name ?? ''
   const firstId = tabs[0]?.id ?? 'p-cash'
 
@@ -108,6 +114,10 @@ export default function PaymentScreen() {
   const due = Math.max(0, +(total - prepay).toFixed(2))     // к оплате гостем (за вычетом предоплаты)
   const toPayLeft = Math.max(0, +(due - paid).toFixed(2))   // «ВНЕСТИ»
   const change = Math.max(0, +(paid - due).toFixed(2))      // «СДАЧА»
+  // лимит оплаты бонусами: min(баланс карты, лимит % от чека)
+  const maxBonus = loyaltyCard ? +Math.min(loyaltyCard.balance, due * pos.loyaltyProgram.redeemLimitPct / 100).toFixed(2) : 0
+  const bonusEntered = +(amountOf('p-bonus')).toFixed(2)
+  const bonusOver = bonusEntered > maxBonus + 0.01
   const fiscalSep = pos.establishment.fiscalBeforePay // 9.x: раздельная печать фискального чека перед оплатой
   const isFiscalized = order!.status === 'fiscalized'
 
@@ -135,16 +145,25 @@ export default function PaymentScreen() {
     .map((id) => ({ paymentTypeId: id, name: nameOf(id), amount: amountOf(id) }))
 
   const doPay = () => {
+    if (bonusOver) { alert(`Бонусами можно оплатить не более ${formatTenge(maxBonus)}`); return }
     const tenders = splitsNow()
     // предоплата/депозит идёт отдельной строкой оплаты, чтобы сумма платежей сошлась с итогом
     const splits = prepay > 0 ? [...tenders, { paymentTypeId: 'p-prepay', name: 'Предоплата', amount: prepay }] : tenders
     if (splits.length === 0) return
     const used = paymentTypes.filter((p) => tenders.some((s) => s.paymentTypeId === p.id))
+    const bonusUsed = +(tenders.find((s) => s.paymentTypeId === 'p-bonus')?.amount ?? 0).toFixed(2)
+    const moneyPaid = +(tenders.filter((s) => s.paymentTypeId !== 'p-bonus').reduce((s, p) => s + p.amount, 0)).toFixed(2)
     const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid + prepay) : pos.pay(splits, paid + prepay)
     if (closed) {
       if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
       if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
       if (order!.type === 'delivery') printToast(`Доставка${courier ? ` · курьер ${courier}` : ''} · ${prepaid ? 'предоплачено' : 'оплата при получении'}`)
+      // iikoCard: списание бонусов + начисление % от оплаченного деньгами
+      if (loyaltyCard) {
+        const accrued = Math.round(Math.min(moneyPaid, closed.total) * pos.loyaltyProgram.accrualPct / 100)
+        pos.adjustBonus(loyaltyCard.id, accrued - bonusUsed)
+        printToast(`iikoCard · ${loyaltyCard.owner}${bonusUsed > 0 ? ` · списано ${formatTenge(bonusUsed)}` : ''} · начислено ${formatTenge(accrued)} бонусов`)
+      }
       setReceipt(closed)
     }
   }
@@ -280,6 +299,12 @@ export default function PaymentScreen() {
           </div>
           <div className="text-center text-pos-accent text-lg pt-3">{nameOf(active).toUpperCase()}</div>
           <div className="text-center text-5xl font-light py-4">{formatTenge(amountOf(active))}</div>
+          {active === 'p-bonus' && loyaltyCard && (
+            <div className="text-center text-sm pb-2">
+              <div className={bonusOver ? 'text-pos-rose' : 'text-white/60'}>Доступно бонусами: {formatTenge(maxBonus)} (баланс {formatTenge(loyaltyCard.balance)}, лимит {pos.loyaltyProgram.redeemLimitPct}%)</div>
+              <button onClick={() => setActiveEntry(String(maxBonus))} className="mt-1 h-8 px-3 rounded bg-white/15 text-white text-xs">Списать максимум</button>
+            </div>
+          )}
 
           <div className="flex-1 grid grid-cols-5 gap-px bg-black/30 px-px">
             {[['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9']].map((row, r) => (
@@ -306,12 +331,12 @@ export default function PaymentScreen() {
         <BarBtn onClick={() => setShowGoods(true)} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
         <BarBtn onClick={() => printToast('Чек отправлен')} Icon={Send} label="ОТПРАВКА ЧЕКА" />
         {!fiscalSep ? (
-          <button onClick={doPay} disabled={paid < due || total <= 0}
+          <button onClick={doPay} disabled={paid < due || total <= 0 || bonusOver}
             className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= due && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
             ОПЛАТИТЬ
           </button>
         ) : !isFiscalized ? (
-          <button onClick={doFiscal} disabled={paid < due || total <= 0}
+          <button onClick={doFiscal} disabled={paid < due || total <= 0 || bonusOver}
             className={`ml-auto h-12 px-10 rounded-md text-xl font-light ${paid >= due && total > 0 ? 'bg-pos-accent text-gray-900' : 'text-white/30'}`}>
             ФИСКАЛЬНЫЙ ЧЕК
           </button>

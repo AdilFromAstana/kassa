@@ -36,6 +36,9 @@ export default function OrderScreen() {
   const [typePick, setTypePick] = useState(false)
   const [coursePick, setCoursePick] = useState(false)
   const [catPick, setCatPick] = useState(false)
+  const [guestCard, setGuestCard] = useState(false)
+  const [cardNum, setCardNum] = useState('')
+  const loyaltyCard = pos.loyaltyCards.find((c) => c.id === order?.loyaltyCardId)
 
   useEffect(() => { if (!order) navigate('/halls') }, [order, navigate])
   // при переключении на другой заказ — сбросить активного гостя и выбор
@@ -152,6 +155,7 @@ export default function OrderScreen() {
             <span>· {tableLabel}</span>
             <span className="px-1.5 rounded bg-black/20 text-xs">{TYPE_LABEL[order.type]}</span>
             {pos.activePriceCategory !== 'base' && <span className="px-1.5 rounded bg-amber-500/80 text-gray-900 text-xs">{pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name}</span>}
+            {loyaltyCard && <span className="px-1.5 rounded bg-pink-500/80 text-white text-xs">★ {loyaltyCard.owner} · {formatTenge(loyaltyCard.balance)}</span>}
             <span className="flex items-center gap-1">· <Users size={15} /> {order.guests}</span>
             <span className="ml-auto">{order.waiter}</span>
           </div>
@@ -300,6 +304,7 @@ export default function OrderScreen() {
               ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { const n = window.prompt('Название барного счёта (имя гостя/карта):', order.tabName ?? ''); if (n != null) pos.setOrderTab(order.id, n.trim() || undefined) }, disabled: false }] : []),
               ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
               { label: `Ценовая категория: ${pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name ?? 'Базовая'}`, on: () => setCatPick(true), disabled: false },
+              ...(est.iikoCard && pos.loyaltyProgram.active ? [{ label: loyaltyCard ? `Карта гостя: ${loyaltyCard.owner}` : 'Карта гостя (iikoCard)', on: () => { setGuestCard(true); setCardNum('') }, disabled: false }] : []),
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
               { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
@@ -444,6 +449,42 @@ export default function OrderScreen() {
               ))}
             </div>
             <button onClick={() => setCatPick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* карта гостя iikoCard: прокатка/ввод номера → привязка к заказу */}
+      {guestCard && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setGuestCard(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-5 w-[420px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-1">Карта гостя (iikoCard)</div>
+            <div className="text-sm text-gray-500 mb-3">Начисление {pos.loyaltyProgram.accrualPct}% от оплаты деньгами · оплата бонусами до {pos.loyaltyProgram.redeemLimitPct}% чека.</div>
+            {loyaltyCard ? (
+              <div className="bg-pink-50 border border-pink-200 rounded-md p-3 mb-3">
+                <div className="font-medium">★ {loyaltyCard.owner}</div>
+                <div className="text-sm text-gray-500">{loyaltyCard.number} · {loyaltyCard.phone}</div>
+                <div className="text-sm mt-1">Баланс бонусов: <b>{formatTenge(loyaltyCard.balance)}</b></div>
+                <button onClick={() => { pos.attachLoyaltyCard(order.id, undefined); setGuestCard(false) }} className="mt-2 h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">Отвязать карту</button>
+              </div>
+            ) : (
+              <>
+                <form onSubmit={(e) => { e.preventDefault(); const c = pos.loyaltyCards.find((x) => x.number.replace(/\s/g, '') === cardNum.replace(/\s/g, '') || x.phone.replace(/\D/g, '') === cardNum.replace(/\D/g, '')); if (c) { pos.attachLoyaltyCard(order.id, c.id); setGuestCard(false) } else printToast('Карта не найдена') }} className="flex gap-2 mb-3">
+                  <input value={cardNum} onChange={(e) => setCardNum(e.target.value)} autoFocus placeholder="номер карты / телефон" className="flex-1 h-10 rounded-md border border-gray-300 px-3 outline-none" />
+                  <button type="submit" disabled={!cardNum.trim()} className="h-10 px-4 rounded-md bg-pos-blue text-white disabled:opacity-40">Привязать</button>
+                </form>
+                <div className="text-xs text-gray-400 mb-1">Или выберите карту:</div>
+                <div className="grid grid-cols-1 gap-1 max-h-44 overflow-auto">
+                  {pos.loyaltyCards.map((c) => (
+                    <button key={c.id} onClick={() => { pos.attachLoyaltyCard(order.id, c.id); setGuestCard(false) }}
+                      className="flex items-center justify-between px-3 h-11 rounded-md bg-gray-100 hover:bg-gray-200 text-left">
+                      <span>{c.owner} <span className="text-xs text-gray-400">{c.number}</span></span>
+                      <span className="text-sm text-emerald-700">{formatTenge(c.balance)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <button onClick={() => setGuestCard(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Закрыть</button>
           </div>
         </div>
       )}
