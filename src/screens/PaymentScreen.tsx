@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Menu, Lock, ChevronLeft, Banknote, CreditCard, Ban, MoreHorizontal, Gift, UtensilsCrossed, ReceiptText, Send, X } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { findTable } from '../mock/data'
-import { formatTenge, vatAmount } from '../lib/money'
+import { formatTenge, vatBreakdown } from '../lib/money'
 import { printToast } from '../lib/print'
 import type { PaymentSplit, ClosedOrder, PaymentKind } from '../types'
 
@@ -57,7 +57,9 @@ export default function PaymentScreen() {
               <div key={i} className="flex justify-between text-gray-600"><span>{p.name}</span><span>{formatTenge(p.amount)}</span></div>
             ))}
             <div className="flex justify-between"><span>Сдача</span><span>{formatTenge(receipt.change)}</span></div>
-            <div className="flex justify-between text-gray-500"><span>в т.ч. ҚҚС 16%</span><span>{formatTenge(vatAmount(receipt.total, 16))}</span></div>
+            {vatBreakdown(receipt.lines.map((l) => ({ gross: lineTotal(l), rate: l.vat }))).map((r) => (
+              <div key={r.rate} className="flex justify-between text-gray-500"><span>в т.ч. ҚҚС {r.rate}%</span><span>{formatTenge(r.vat)}</span></div>
+            ))}
             <div className="text-center text-xs text-gray-400 mt-3">ФД №{receipt.fiscalDocNo} · {receipt.paidAt}</div>
           </div>
         </div>

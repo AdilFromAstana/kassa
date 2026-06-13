@@ -2,7 +2,7 @@ import { useState } from 'react'
 import BackButton from '../components/BackButton'
 import { useNavigate } from 'react-router-dom'
 import { usePos, lineTotal } from '../store/pos'
-import { formatTenge, vatAmount } from '../lib/money'
+import { formatTenge, vatAmount, vatBreakdown } from '../lib/money'
 import { printToast, toast } from '../lib/print'
 import ReportParamsModal from '../components/ReportParamsModal'
 import { attendance, halls } from '../mock/data'
@@ -99,8 +99,11 @@ export default function ReportsScreen() {
   // ───────────────────────── агрегаты смены ─────────────────────────
   const count = closedOrders.length
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
-  const vat = vatAmount(revenue, 16)
+  // мультиставка ҚҚС: разбивка по реальным ставкам позиций (16%/0%)
+  const vatRows = vatBreakdown(closedOrders.flatMap((o) => o.lines).map((l) => ({ gross: lineTotal(l), rate: l.vat })))
+  const vat = +vatRows.reduce((s, r) => s + r.vat, 0).toFixed(2)
   const net = +(revenue - vat).toFixed(2)
+  const multiRate = vatRows.length > 1
   const avg = count ? +(revenue / count).toFixed(2) : 0
   const guests = closedOrders.reduce((s, o) => s + o.guests, 0)
 
@@ -172,7 +175,14 @@ export default function ReportsScreen() {
           {typeTaxRows()}
           <Hr />
           <Row k="ИТОГО выручка" v={formatTenge(revenue)} b />
-          <Row k="в т.ч. ҚҚС 16%" v={formatTenge(vat)} />
+          {multiRate ? (
+            <Block title="ҚҚС по ставкам">
+              {vatRows.map((r) => (
+                <Row key={r.rate} k={`ставка ${r.rate}% (оборот ${formatTenge(r.gross)})`} v={formatTenge(r.vat)} />
+              ))}
+              <Row k="ҚҚС всего" v={formatTenge(vat)} b />
+            </Block>
+          ) : <Row k="в т.ч. ҚҚС 16%" v={formatTenge(vat)} />}
           <Row k="без НДС" v={formatTenge(net)} />
         </>
       case '042': case '012':
