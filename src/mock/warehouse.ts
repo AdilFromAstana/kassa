@@ -31,21 +31,21 @@ export const baseIngredients: Ingredient[] = [
   { id: 'i-masc',    code: 'T3005', name: 'Маскарпоне',           unit: 'кг', stock: 5,   costPerUnit: 6000,  min: 1 },
   { id: 'i-egg',     code: 'T3006', name: 'Яйцо',                 unit: 'шт', stock: 120, costPerUnit: 70,    min: 24 },
   // Бар / напитки
-  { id: 'i-coffee',  code: 'T4001', name: 'Кофе зерно',           unit: 'кг', stock: 5,   costPerUnit: 7000,  min: 1 },
-  { id: 'i-beerkeg', code: 'T4002', name: 'Пиво разливное',       unit: 'л',  stock: 50,  costPerUnit: 700,   min: 10 },
-  { id: 'i-wine',    code: 'T4003', name: 'Вино',                 unit: 'л',  stock: 15,  costPerUnit: 3000,  min: 3 },
-  { id: 'i-cola',    code: 'T4004', name: 'Кола 0.5 (бут.)',      unit: 'шт', stock: 60,  costPerUnit: 350,   min: 12 },
-  { id: 'i-water',   code: 'T4005', name: 'Вода 0.5 (бут.)',      unit: 'шт', stock: 80,  costPerUnit: 120,   min: 12 },
+  { id: 'i-coffee',  code: 'T4001', name: 'Кофе зерно',           unit: 'кг', stock: 5,   costPerUnit: 7000,  min: 1,  store: 'Бар' },
+  { id: 'i-beerkeg', code: 'T4002', name: 'Пиво разливное',       unit: 'л',  stock: 50,  costPerUnit: 700,   min: 10, store: 'Бар' },
+  { id: 'i-wine',    code: 'T4003', name: 'Вино',                 unit: 'л',  stock: 15,  costPerUnit: 3000,  min: 3,  store: 'Бар' },
+  { id: 'i-cola',    code: 'T4004', name: 'Кола 0.5 (бут.)',      unit: 'шт', stock: 60,  costPerUnit: 350,   min: 12, store: 'Бар' },
+  { id: 'i-water',   code: 'T4005', name: 'Вода 0.5 (бут.)',      unit: 'шт', stock: 80,  costPerUnit: 120,   min: 12, store: 'Бар' },
   // Розница
   { id: 'i-bag',     code: 'T5001', name: 'Пакет',                unit: 'шт', stock: 300, costPerUnit: 20,    min: 50 },
   { id: 'i-mug',     code: 'T5002', name: 'Кружка с логотипом',   unit: 'шт', stock: 24,  costPerUnit: 1500,  min: 5 },
   // Под модификаторы (гарниры / альт. молоко / сиропы)
   { id: 'i-buckwheat', code: 'T2008', name: 'Гречка',                unit: 'кг', stock: 15, costPerUnit: 500,  min: 3 },
-  { id: 'i-milkLF',    code: 'T3007', name: 'Молоко безлактозное',   unit: 'л',  stock: 8,  costPerUnit: 700,  min: 2 },
-  { id: 'i-milkCoco',  code: 'T3008', name: 'Молоко кокосовое',      unit: 'л',  stock: 6,  costPerUnit: 1100, min: 1 },
-  { id: 'i-syrCaramel',code: 'T4006', name: 'Сироп карамельный',     unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1 },
-  { id: 'i-syrVanilla',code: 'T4007', name: 'Сироп ванильный',       unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1 },
-  { id: 'i-syrNut',    code: 'T4008', name: 'Сироп ореховый',        unit: 'л',  stock: 3,  costPerUnit: 2600, min: 1 },
+  { id: 'i-milkLF',    code: 'T3007', name: 'Молоко безлактозное',   unit: 'л',  stock: 8,  costPerUnit: 700,  min: 2, store: 'Бар' },
+  { id: 'i-milkCoco',  code: 'T3008', name: 'Молоко кокосовое',      unit: 'л',  stock: 6,  costPerUnit: 1100, min: 1, store: 'Бар' },
+  { id: 'i-syrCaramel',code: 'T4006', name: 'Сироп карамельный',     unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1, store: 'Бар' },
+  { id: 'i-syrVanilla',code: 'T4007', name: 'Сироп ванильный',       unit: 'л',  stock: 4,  costPerUnit: 2500, min: 1, store: 'Бар' },
+  { id: 'i-syrNut',    code: 'T4008', name: 'Сироп ореховый',        unit: 'л',  stock: 3,  costPerUnit: 2600, min: 1, store: 'Бар' },
 ]
 
 // ───────────────────────── Техкарты (ТТК) ─────────────────────────
@@ -53,18 +53,18 @@ export const baseIngredients: Ingredient[] = [
 export const techCards: Record<string, TechCardItem[]> = {
   // Горячее
   // гарнир — отдельным модификатором (m-garnir, обязателен), поэтому в базе картофеля нет
-  'd-rulka':  [{ ingredientId: 'i-lamb', gross: 0.5 }, { ingredientId: 'i-oil', gross: 0.03 }],
-  'd-steak':  [{ ingredientId: 'i-ribeye', gross: 0.3 }, { ingredientId: 'i-butter', gross: 0.02 }, { ingredientId: 'i-oil', gross: 0.02 }],
+  'd-rulka':  [{ ingredientId: 'i-lamb', gross: 0.5, coldLossPct: 10, hotLossPct: 37 }, { ingredientId: 'i-oil', gross: 0.03 }],
+  'd-steak':  [{ ingredientId: 'i-ribeye', gross: 0.3, coldLossPct: 10, hotLossPct: 37 }, { ingredientId: 'i-butter', gross: 0.02 }, { ingredientId: 'i-oil', gross: 0.02 }],
   'd-cutlet': [{ ingredientId: 'i-chicken', gross: 0.25 }, { ingredientId: 'i-butter', gross: 0.03 }, { ingredientId: 'i-flour', gross: 0.05 }, { ingredientId: 'i-egg', gross: 1 }],
   // Национальное
-  'd-besh':   [{ ingredientId: 'i-beef', gross: 0.3 }, { ingredientId: 'i-flour', gross: 0.2 }, { ingredientId: 'i-onion', gross: 0.1 }, { ingredientId: 'i-egg', gross: 1 }],
+  'd-besh':   [{ ingredientId: 'i-beef', gross: 0.3, coldLossPct: 8, hotLossPct: 38 }, { ingredientId: 'i-flour', gross: 0.2 }, { ingredientId: 'i-onion', gross: 0.1, coldLossPct: 16 }, { ingredientId: 'i-egg', gross: 1 }],
   'd-plov':   [{ ingredientId: 'i-rice', gross: 0.2 }, { ingredientId: 'i-beef', gross: 0.15 }, { ingredientId: 'i-onion', gross: 0.1 }, { ingredientId: 'i-oil', gross: 0.05 }],
   'd-manty':  [{ ingredientId: 'i-beef', gross: 0.15 }, { ingredientId: 'i-flour', gross: 0.15 }, { ingredientId: 'i-onion', gross: 0.08 }],
   'd-lagman': [{ ingredientId: 'i-beef', gross: 0.15 }, { ingredientId: 'i-flour', gross: 0.12 }, { ingredientId: 'i-onion', gross: 0.08 }, { ingredientId: 'i-oil', gross: 0.03 }],
   // Напитки
   'd-cola':   [{ ingredientId: 'i-cola', gross: 1 }],
   'd-water':  [{ ingredientId: 'i-water', gross: 1 }],
-  'd-juice':  [{ ingredientId: 'i-orange', gross: 0.4 }],
+  'd-juice':  [{ ingredientId: 'i-orange', gross: 0.4, coldLossPct: 50 }],
   // Кофейня
   'd-cappu':  [{ ingredientId: 'i-coffee', gross: 0.018 }, { ingredientId: 'i-milk', gross: 0.15 }],
   'd-latte':  [{ ingredientId: 'i-coffee', gross: 0.018 }, { ingredientId: 'i-milk', gross: 0.15 }],
@@ -74,7 +74,7 @@ export const techCards: Record<string, TechCardItem[]> = {
   'd-wine':   [{ ingredientId: 'i-wine', gross: 0.15 }],
   // Десерты
   'd-tira':   [{ ingredientId: 'i-masc', gross: 0.08 }, { ingredientId: 'i-cream', gross: 0.05 }, { ingredientId: 'i-egg', gross: 1 }, { ingredientId: 'i-sugar', gross: 0.03 }, { ingredientId: 'i-coffee', gross: 0.005 }],
-  'd-cali':   [{ ingredientId: 'i-rice', gross: 0.1 }, { ingredientId: 'i-salmon', gross: 0.05 }, { ingredientId: 'i-nori', gross: 1 }],
+  'd-cali':   [{ ingredientId: 'i-rice', gross: 0.1 }, { ingredientId: 'i-salmon', gross: 0.05, coldLossPct: 8 }, { ingredientId: 'i-nori', gross: 1 }],
   // Товары (розница)
   'd-pack':   [{ ingredientId: 'i-bag', gross: 1 }],
   'd-merch':  [{ ingredientId: 'i-mug', gross: 1 }],
@@ -99,6 +99,28 @@ export const modifierTechCards: Record<string, TechCardItem[]> = {
   'mo-vanilla':   [{ ingredientId: 'i-syrVanilla', gross: 0.02 }],
   'mo-nut':       [{ ingredientId: 'i-syrNut', gross: 0.02 }],
   // mo-regular (обычное молоко) — уже в базовой техкарте, отдельно не списывается.
+}
+
+// ─────────────── Нетто / выход готового продукта (по техкарте) ───────────────
+// Списание и себестоимость идут по БРУТТО; нетто/выход — расчётные поля калькуляционной карты.
+export const itemNetto = (it: TechCardItem): number =>
+  +(it.gross * (1 - (it.coldLossPct ?? 0) / 100)).toFixed(4)
+
+export const itemYield = (it: TechCardItem): number =>
+  +(itemNetto(it) * (1 - (it.hotLossPct ?? 0) / 100)).toFixed(4)
+
+// «Выход блюда» — суммарный выход готового продукта по весовым/объёмным ингредиентам (кг/л) на 1 порцию.
+// Штучные (шт) ингредиенты в массу не суммируются. Возвращает 0, если выхода в кг/л нет.
+export function dishYield(dishId: string, ings: Ingredient[], over?: Record<string, TechCardItem[]>): number {
+  const card = over?.[dishId] ?? techCards[dishId]
+  if (!card) return 0
+  const m = byId(ings)
+  let sum = 0
+  for (const it of card) {
+    const unit = m[it.ingredientId]?.unit
+    if (unit === 'кг' || unit === 'л') sum += itemYield(it)
+  }
+  return +sum.toFixed(3)
 }
 
 // ───────────────────────── Расчёты ─────────────────────────

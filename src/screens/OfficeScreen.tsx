@@ -4,7 +4,7 @@ import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
-import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
+import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 import { todayISO, formatRu, fromISO, toISO } from '../lib/date'
@@ -726,25 +726,42 @@ export default function OfficeScreen() {
                   <option value="">— выберите —</option>
                   {dishes.filter((d) => techCards[d.id] || techCardOverrides[d.id]).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
-                {editDish && <span className="ml-auto text-sm text-gray-400">Себест.: {formatTenge(dishCost(editDish, ingredients, techCardOverrides))} · доступно: {(() => { const m = dishMaxPortions(editDish, ingredients, techCardOverrides); return m === Infinity ? '∞' : m })()}</span>}
+                {editDish && <span className="ml-auto text-sm text-gray-400">Себест.: {formatTenge(dishCost(editDish, ingredients, techCardOverrides))} · выход: {(() => { const y = dishYield(editDish, ingredients, techCardOverrides); return y > 0 ? String(y).replace('.', ',') : '—' })()} · доступно: {(() => { const m = dishMaxPortions(editDish, ingredients, techCardOverrides); return m === Infinity ? '∞' : m })()}</span>}
               </div>
-              {!editDish ? <div className="text-gray-400 text-sm">Выберите блюдо для правки рецепта. Изменения сразу влияют на списание со склада на кассе.</div> : (() => {
+              {!editDish ? <div className="text-gray-400 text-sm">Выберите блюдо для правки рецепта. Списание и себестоимость считаются по брутто; потери (хол./гор. обработка) дают нетто и выход. Изменения сразу влияют на списание со склада на кассе.</div> : (() => {
                 const card = techCardOverrides[editDish] ?? techCards[editDish] ?? []
                 return (
                   <div>
+                    <div className="flex items-center gap-2 mb-1 text-xs text-gray-400">
+                      <span className="flex-1">Ингредиент</span>
+                      <span className="w-20 text-right">Брутто</span>
+                      <span className="w-16 text-right">Потери хол.%</span>
+                      <span className="w-16 text-right">Нетто</span>
+                      <span className="w-16 text-right">Потери гор.%</span>
+                      <span className="w-16 text-right">Выход</span>
+                      <span className="w-6"></span>
+                    </div>
                     {card.map((it, idx) => {
                       const ing = ingredients.find((x) => x.id === it.ingredientId)
+                      const upd = (patch: Partial<typeof it>) => setTechCard(editDish, card.map((c, i) => i === idx ? { ...c, ...patch } : c))
                       return (
                         <div key={idx} className="flex items-center gap-2 mb-2">
-                          <select value={it.ingredientId} onChange={(e) => setTechCard(editDish, card.map((c, i) => i === idx ? { ...c, ingredientId: e.target.value } : c))}
+                          <select value={it.ingredientId} onChange={(e) => upd({ ingredientId: e.target.value })}
                             className="h-9 rounded border border-gray-300 px-2 flex-1">
                             {ingredients.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.unit})</option>)}
                           </select>
                           <input type="number" step="0.001" min={0} value={it.gross}
-                            onChange={(e) => setTechCard(editDish, card.map((c, i) => i === idx ? { ...c, gross: Math.max(0, parseFloat(e.target.value) || 0) } : c))}
-                            className="w-24 h-9 rounded border border-gray-300 px-2 text-right" />
-                          <span className="text-gray-400 text-sm w-8">{ing?.unit}</span>
-                          <button onClick={() => setTechCard(editDish, card.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500" title="Убрать">✕</button>
+                            onChange={(e) => upd({ gross: Math.max(0, parseFloat(e.target.value) || 0) })}
+                            className="w-20 h-9 rounded border border-gray-300 px-2 text-right" />
+                          <input type="number" step="1" min={0} max={99} value={it.coldLossPct ?? 0}
+                            onChange={(e) => upd({ coldLossPct: Math.min(99, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                            className="w-16 h-9 rounded border border-gray-300 px-2 text-right" />
+                          <span className="w-16 text-right text-sm text-gray-500">{String(itemNetto(it)).replace('.', ',')}</span>
+                          <input type="number" step="1" min={0} max={99} value={it.hotLossPct ?? 0}
+                            onChange={(e) => upd({ hotLossPct: Math.min(99, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                            className="w-16 h-9 rounded border border-gray-300 px-2 text-right" />
+                          <span className="w-16 text-right text-sm text-gray-500">{String(itemYield(it)).replace('.', ',')} {ing?.unit}</span>
+                          <button onClick={() => setTechCard(editDish, card.filter((_, i) => i !== idx))} className="w-6 text-gray-400 hover:text-red-500" title="Убрать">✕</button>
                         </div>
                       )
                     })}
