@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { usePos, orderTotal } from '../store/pos'
 import { halls, tablesByHall, findTable } from '../mock/data'
 import { formatTenge } from '../lib/money'
-import { minutesSince } from '../lib/date'
+import { minutesSince, todayISO } from '../lib/date'
+import { printToast } from '../lib/print'
 import TopBar from '../components/TopBar'
 import GuestCountModal from '../components/GuestCountModal'
 import type { Table, Order } from '../types'
@@ -52,23 +53,30 @@ function BusyInfo({ ord }: { ord: Order }) {
 }
 
 // Стол на схеме зала: абсолютная позиция, перетаскивание в режиме правки (drag локальный, коммит на отпускании).
-function DraggableTable({ t, base, editLayout, order, onOpen, onCommit }: {
-  t: Table; base: Pos; editLayout: boolean; order?: Order; onOpen: () => void; onCommit: (p: Pos) => void
+// Долгое нажатие (вне режима правки) → контекст-меню стола.
+function DraggableTable({ t, base, editLayout, order, booking, onOpen, onContext, onCommit }: {
+  t: Table; base: Pos; editLayout: boolean; order?: Order; booking?: string; onOpen: () => void; onContext: () => void; onCommit: (p: Pos) => void
 }) {
   const [pos, setPos] = useState<Pos>(base)
   const drag = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const hold = useRef<{ timer: number; fired: boolean } | null>(null)
   // синхронизировать позицию при внешних изменениях плана (если не тащим прямо сейчас)
   useEffect(() => { if (!drag.current) setPos(base) }, [base.x, base.y]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { w, h, round } = tableShape(t.seats)
   const mins = order ? minutesSince(order.openedAt) : 0
+  const clearHold = () => { if (hold.current) { clearTimeout(hold.current.timer); } }
 
   const onDown = (e: React.PointerEvent) => {
-    if (!editLayout) return
+    if (!editLayout) {
+      hold.current = { timer: window.setTimeout(() => { hold.current!.fired = true; onContext() }, 550), fired: false }
+      return
+    }
     e.currentTarget.setPointerCapture(e.pointerId)
     drag.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, moved: false }
   }
   const onMove = (e: React.PointerEvent) => {
+    if (hold.current) clearHold()
     if (!drag.current) return
     const dx = e.clientX - drag.current.sx
     const dy = e.clientY - drag.current.sy
@@ -76,6 +84,7 @@ function DraggableTable({ t, base, editLayout, order, onOpen, onCommit }: {
     setPos({ x: Math.max(0, drag.current.ox + dx), y: Math.max(0, drag.current.oy + dy) })
   }
   const onUp = () => {
+    if (hold.current) { clearHold(); const fired = hold.current.fired; hold.current = null; if (fired) return }
     const d = drag.current
     drag.current = null
     if (!d) { if (!editLayout) onOpen(); return }
@@ -92,6 +101,7 @@ function DraggableTable({ t, base, editLayout, order, onOpen, onCommit }: {
       className={`absolute flex flex-col items-center justify-center gap-0.5 border-2 transition active:scale-[0.98] ${round}
         ${editLayout ? 'cursor-move ring-2 ring-pos-blue/60' : 'cursor-pointer'}
         ${order ? busyColor(mins) : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`}>
+      {booking && <span className="absolute -top-1 -right-1 text-[9px] bg-purple-500 text-white rounded px-1 leading-tight">бронь {booking}</span>}
       <div className="text-xl font-bold leading-none">{t.no}</div>
       {order ? <BusyInfo ord={order} /> : <div className="text-[10px] opacity-60">{t.seats} мест</div>}
     </button>
@@ -100,18 +110,24 @@ function DraggableTable({ t, base, editLayout, order, onOpen, onCommit }: {
 
 export default function HallScreen() {
   const navigate = useNavigate()
-  const { orders, startOrder, openExistingOrder, establishment } = usePos()
+  const { orders, startOrder, openExistingOrder, establishment, banquets, moveOrderToTable, mergeOrderInto } = usePos()
   const [hallId, setHallId] = useState(halls[0].id)
   const [mode, setMode] = useState<Mode>('scheme')
   const [guestTable, setGuestTable] = useState<Table | null>(null)
   const [layout, setLayout] = useState<Record<string, Pos>>(loadLayout)
   const [editLayout, setEditLayout] = useState(false)
+  const [ctxTable, setCtxTable] = useState<Table | null>(null)         // стол для контекст-меню
+  const [ctxAction, setCtxAction] = useState<'move' | 'merge' | null>(null) // под-выбор стола
 
   // фастфуд — столов нет, на схему зала не пускаем
   useEffect(() => { if (establishment.mode === 'fastfood') navigate('/menu') }, [establishment.mode, navigate])
 
   const openOrderOnTable = (tableId: string) => orders.find((o) => o.tableId === tableId)
   const hallName = (id: string | null) => (id ? halls.find((h) => h.id === id)?.name ?? '' : '')
+  // бронь стола на сегодня (резерв/банкет, действует)
+  const today = todayISO()
+  const bookingOf = (tableId: string) => banquets.find((b) => b.tableId === tableId && b.date === today && b.status === 'Действует')
+  const openContext = (t: Table) => { setCtxTable(t); setCtxAction(null) }
 
   const onTable = (t: Table) => {
     const existing = openOrderOnTable(t.id)
@@ -131,14 +147,20 @@ export default function HallScreen() {
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(next)) } catch { /* ignore */ }
   }
 
-  // плитка стола (режим «Все столы»)
+  // плитка стола (режим «Все столы»): тап — открыть, долгое нажатие — контекст-меню
   const TableTile = ({ t }: { t: Table }) => {
     const ord = openOrderOnTable(t.id)
     const mins = ord ? minutesSince(ord.openedAt) : 0
+    const booking = bookingOf(t.id)
+    const hold = useRef<{ timer: number; fired: boolean } | null>(null)
+    const down = () => { hold.current = { timer: window.setTimeout(() => { hold.current!.fired = true; openContext(t) }, 550), fired: false } }
+    const up = () => { if (hold.current) clearTimeout(hold.current.timer) }
+    const click = () => { if (hold.current?.fired) { hold.current = null; return } onTable(t) }
     return (
-      <button onClick={() => onTable(t)}
-        className={`h-28 rounded-lg flex flex-col items-center justify-center gap-0.5 transition active:scale-95 border-2 border-transparent
+      <button onPointerDown={down} onPointerUp={up} onPointerLeave={up} onClick={click}
+        className={`relative h-28 rounded-lg flex flex-col items-center justify-center gap-0.5 transition active:scale-95 border-2 border-transparent
           ${ord ? busyColor(mins) : 'bg-white/10 hover:bg-white/20'}`}>
+        {booking && <span className="absolute top-1 right-1 text-[9px] bg-purple-500 text-white rounded px-1">бронь {booking.time}</span>}
         <div className="text-2xl font-bold leading-none">{t.no}</div>
         <div className="text-xs opacity-70">{t.seats} мест</div>
         {ord && <BusyInfo ord={ord} />}
@@ -191,7 +213,8 @@ export default function HallScreen() {
               <div className="relative bg-black/20 rounded-lg border border-white/10" style={{ width: planW, height: planH }}>
                 {planTables.map((t) => (
                   <DraggableTable key={t.id} t={t} base={posOf(t)} editLayout={editLayout}
-                    order={openOrderOnTable(t.id)} onOpen={() => onTable(t)} onCommit={(p) => commitPos(t.id, p)} />
+                    order={openOrderOnTable(t.id)} booking={bookingOf(t.id)?.time}
+                    onOpen={() => onTable(t)} onContext={() => openContext(t)} onCommit={(p) => commitPos(t.id, p)} />
                 ))}
               </div>
               {/* легенда занятости */}
@@ -259,6 +282,70 @@ export default function HallScreen() {
       {guestTable && (
         <GuestCountModal onOk={confirmGuests} onCancel={() => setGuestTable(null)} />
       )}
+
+      {/* контекст-меню стола (долгое нажатие): открыть / перенести / объединить / бронь */}
+      {ctxTable && (() => {
+        const ord = openOrderOnTable(ctxTable.id)
+        const booking = bookingOf(ctxTable.id)
+        const close = () => { setCtxTable(null); setCtxAction(null) }
+        const freeTables = halls.flatMap((h) => tablesByHall(h.id)).filter((x) => x.id !== ctxTable.id && !openOrderOnTable(x.id))
+        const busyTables = orders.filter((o) => o.tableId && o.tableId !== ctxTable.id)
+        return (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-40" onClick={close}>
+            <div className="bg-white text-gray-800 rounded-lg w-[400px] p-4 max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="text-lg font-semibold mb-1">Стол {ctxTable.no} · {ctxTable.seats} мест</div>
+              <div className="text-sm text-gray-500 mb-3">{ord ? `Занят · ${formatTenge(orderTotal(ord))} · ${ord.waiter}` : 'Свободен'}{booking ? ` · бронь ${booking.time} (${booking.clientName})` : ''}</div>
+
+              {!ctxAction && (
+                <div className="flex flex-col gap-2">
+                  {ord ? (
+                    <>
+                      <button onClick={() => { openExistingOrder(ord.id); navigate('/order') }} className="h-12 rounded-md bg-pos-blue text-white">Открыть заказ</button>
+                      <button onClick={() => setCtxAction('move')} disabled={freeTables.length === 0} className="h-12 rounded-md bg-gray-100 disabled:opacity-40">Перенести на другой стол</button>
+                      <button onClick={() => setCtxAction('merge')} disabled={busyTables.length === 0} className="h-12 rounded-md bg-gray-100 disabled:opacity-40">Объединить с заказом стола</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => { close(); onTable(ctxTable) }} className="h-12 rounded-md bg-pos-green text-white">Новый заказ</button>
+                      <button onClick={() => { close(); navigate('/banquet/new') }} className="h-12 rounded-md bg-purple-600 text-white">Забронировать стол</button>
+                    </>
+                  )}
+                  {booking && <button onClick={() => { close(); navigate('/banquets') }} className="h-12 rounded-md bg-gray-100">Открыть бронь</button>}
+                  <button onClick={close} className="h-11 rounded-md bg-gray-200 mt-1">Отмена</button>
+                </div>
+              )}
+
+              {ctxAction === 'move' && ord && (
+                <div>
+                  <div className="text-sm text-gray-500 mb-2">Перенести заказ №{ord.id} на свободный стол:</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {freeTables.map((x) => (
+                      <button key={x.id} onClick={() => { moveOrderToTable(ord.id, x.id, x.hallId); close(); printToast(`Заказ №${ord.id} перенесён на стол ${x.no}`) }}
+                        className="h-12 rounded-md bg-pos-blue text-white">{hallName(x.hallId)[0]}·{x.no}</button>
+                    ))}
+                  </div>
+                  <button onClick={() => setCtxAction(null)} className="h-11 w-full rounded-md bg-gray-200 mt-3">Назад</button>
+                </div>
+              )}
+
+              {ctxAction === 'merge' && ord && (
+                <div>
+                  <div className="text-sm text-gray-500 mb-2">Объединить заказ №{ord.id} с заказом стола:</div>
+                  <div className="flex flex-col gap-2">
+                    {busyTables.map((o) => (
+                      <button key={o.id} onClick={() => { mergeOrderInto(ord.id, o.id); close(); printToast(`Заказ №${ord.id} объединён с №${o.id}`) }}
+                        className="flex justify-between items-center h-12 px-3 rounded-md bg-gray-100 hover:bg-gray-200">
+                        <span>Стол {findTable(o.tableId!)?.no ?? '—'} · №{o.id}</span><span className="font-medium">{formatTenge(orderTotal(o))}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setCtxAction(null)} className="h-11 w-full rounded-md bg-gray-200 mt-3">Назад</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
