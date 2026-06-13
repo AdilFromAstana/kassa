@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor, Trash2, Plus } from 'lucide-react'
-import { usePos, lineTotal } from '../store/pos'
+import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance } from '../mock/data'
@@ -88,16 +88,16 @@ export default function OfficeScreen() {
     salaryPayouts, paySalary, cashMovements, writeOffs, cashShift,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
-    shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck,
+    shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
-  const [salary, setSalary] = useState<Record<string, number>>({})
-  // тип оплаты сотрудника: оклад / повременная (по часам из явок кассы); ставка ₸/час
-  const [payMode, setPayMode] = useState<Record<string, 'salary' | 'hourly'>>({})
-  const [hourRate, setHourRate] = useState<Record<string, number>>({})
+  // профиль оплаты сотрудника берётся из стора (офис правит → касса видит то же)
+  const okladOf = (id: string) => payProfiles[id]?.oklad ?? DEFAULT_OKLAD
+  const rateOf = (id: string) => payProfiles[id]?.rate ?? DEFAULT_HOUR_RATE
+  const modeOf = (id: string, positions: string[]) => payProfiles[id]?.mode ?? defaultPayMode(positions)
   const allowed = ROLE_SECTIONS[role]
   const visibleNav = NAV.filter((n) => allowed.includes(n.id))
   useEffect(() => { if (!allowed.includes(section)) setSection(allowed[0]) }, [role]) // роль сменилась → перейти на доступный раздел
@@ -218,8 +218,8 @@ export default function OfficeScreen() {
 
   // P&L (упрощённо): выручка без НДС − себестоимость проданного − ФОТ (оклады + СО 3.5%)
   const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l.dishId, l.qty), 0), 0).toFixed(2)
-  const payrollBase = staffList.reduce((s, p) => s + (salary[p.id] ?? 250000), 0) // оклады (gross)
-  const payrollEmployer = staffList.reduce((s, p) => s + kzTax(salary[p.id] ?? 250000).employerCost, 0) // полная стоимость ФОТ с взносами РК
+  const payrollBase = staffList.reduce((s, p) => s + okladOf(p.id), 0) // оклады (gross)
+  const payrollEmployer = staffList.reduce((s, p) => s + kzTax(okladOf(p.id)).employerCost, 0) // полная стоимость ФОТ с взносами РК
   const grossProfit = +(noVat(revenue) - cogs).toFixed(2)
   const opProfit = +(grossProfit - payrollEmployer).toFixed(2)
 
@@ -254,18 +254,13 @@ export default function OfficeScreen() {
     }
     return +(mins / 60).toFixed(1)
   }
-  const defaultMode = (positions: string[]): 'salary' | 'hourly' =>
-    positions.some((p) => ['Официант', 'Бармен', 'Повар'].includes(p)) ? 'hourly' : 'salary'
-  const modeOf = (staffId: string, positions: string[]) => payMode[staffId] ?? defaultMode(positions)
-  const rateOf = (staffId: string) => hourRate[staffId] ?? 1500
-
   // ───────── зарплата: начислено (база − налоги + премия − удержания) + выплаты (аванс/расчёт) ─────────
   // База = оклад ИЛИ повременная (часы из явок кассы × ставка). Премия — за продажи в закрытых заказах кассы.
   const payrollOf = (staffId: string, staffName: string, positions: string[]) => {
     const mode = modeOf(staffId, positions)
     const hours = hoursOf(staffName)
     const rate = rateOf(staffId)
-    const okl = mode === 'hourly' ? Math.round(hours * rate) : (salary[staffId] ?? 250000)
+    const okl = mode === 'hourly' ? Math.round(hours * rate) : okladOf(staffId)
     const t = kzTax(okl) // 🇰🇿 налоги РК 2026
     const premium = motivationOf(staffName)
     const deduction = salaryDeductions.filter((d) => d.staffId === staffId).reduce((s, d) => s + d.amount, 0)
@@ -1212,14 +1207,14 @@ export default function OfficeScreen() {
                       <tr key={p.id} className="border-b border-gray-100 last:border-0">
                         <td className="p-2">{p.name}<div className="text-xs text-gray-400">{p.positions[0]}</div></td>
                         <td>
-                          <button onClick={() => setPayMode((m) => ({ ...m, [p.id]: mode === 'hourly' ? 'salary' : 'hourly' }))}
+                          <button onClick={() => setPayProfile(p.id, { mode: mode === 'hourly' ? 'salary' : 'hourly' })}
                             className={`h-7 px-2 rounded text-xs ${mode === 'hourly' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-700'}`}>{mode === 'hourly' ? 'повременная' : 'оклад'}</button>
                         </td>
                         <td className="text-right text-gray-500">{mode === 'hourly' ? `${hours} ч` : '—'}</td>
                         <td className="text-right">
                           {mode === 'hourly'
-                            ? <span className="inline-flex items-center gap-1"><input type="number" value={rate} min={0} onChange={(e) => setHourRate((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-20 h-8 rounded border border-gray-300 px-2 text-right" /><span className="text-gray-400 text-xs">/ч</span></span>
-                            : <input type="number" value={salary[p.id] ?? 250000} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" />}
+                            ? <span className="inline-flex items-center gap-1"><input type="number" value={rate} min={0} onChange={(e) => setPayProfile(p.id, { rate: Math.max(0, parseFloat(e.target.value) || 0) })} className="w-20 h-8 rounded border border-gray-300 px-2 text-right" /><span className="text-gray-400 text-xs">/ч</span></span>
+                            : <input type="number" value={okladOf(p.id)} min={0} onChange={(e) => setPayProfile(p.id, { oklad: Math.max(0, parseFloat(e.target.value) || 0) })} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" />}
                         </td>
                         <td className="text-right text-gray-600">{formatTenge(okl)}</td>
                         <td className="text-right text-gray-500" title={`Удержано: ОПВ ${opv} · ВОСМС ${vosms} · ИПН ${ipn}\nРаботодатель: ОПВР ${opvr} · ООСМС ${oosms} · СО ${so} · СН ${sn}`}>{formatTenge(opv + vosms + ipn)}</td>

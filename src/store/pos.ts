@@ -143,6 +143,13 @@ function loadMedChecks(): Record<string, string> {
   return {}
 }
 function persistMedChecks(m: Record<string, string>) { try { localStorage.setItem('iiko-med-checks', JSON.stringify(m)) } catch { /* ignore */ } }
+// Профиль оплаты сотрудника (Зарплата): тип (оклад/повременная), оклад ₸, ставка ₸/ч. Касса читает те же значения.
+type PayProfile = { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }
+function loadPayProfiles(): Record<string, PayProfile> {
+  try { const raw = localStorage.getItem('iiko-pay-profiles'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistPayProfiles(m: Record<string, PayProfile>) { try { localStorage.setItem('iiko-pay-profiles', JSON.stringify(m)) } catch { /* ignore */ } }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
@@ -244,6 +251,12 @@ const DEMO_INIT = DEMO_AUTO
   ? buildDemo({ count: 24, openCount: 4, startFiscal: 3681821000, startOrderId: 184, startMovement: 0 })
   : null
 
+// Дефолты оплаты сотрудника (используются и офисом, и кассой — единая логика).
+export const DEFAULT_OKLAD = 250000
+export const DEFAULT_HOUR_RATE = 1500
+export const defaultPayMode = (positions: string[]): 'salary' | 'hourly' =>
+  positions.some((p) => ['Официант', 'Бармен', 'Повар'].includes(p)) ? 'hourly' : 'salary'
+
 export const lineUnitPrice = (l: OrderLine): number =>
   l.price + l.modifiers.reduce((s, m) => s + m.price * m.qty, 0)
 export const lineTotal = (l: OrderLine): number => lineUnitPrice(l) * l.qty
@@ -295,6 +308,7 @@ interface PosState {
   orderTypes: OrderTypeDef[] // типы заказов (Розничные продажи, topic-112) — режим/налог/по умолчанию
   shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
   medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
+  payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -401,6 +415,7 @@ interface PosState {
   addShiftType: (name: string, from: string, to: string) => void
   removeShiftType: (id: string) => void
   setMedCheck: (staffId: string, expiry: string) => void
+  setPayProfile: (staffId: string, patch: { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }) => void
   addCashOpType: (c: Omit<CashOpType, 'id'>) => void
   removeCashOpType: (id: string) => void
   addWriteoffReason: (name: string) => void
@@ -477,6 +492,7 @@ export const usePos = create<PosState>((set, get) => ({
   orderTypes: loadOrderTypes(),
   shiftTypes: loadShiftTypes(),
   medChecks: loadMedChecks(),
+  payProfiles: loadPayProfiles(),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -1087,6 +1103,11 @@ export const usePos = create<PosState>((set, get) => ({
     const m = { ...st.medChecks, [staffId]: expiry }
     persistMedChecks(m)
     return { medChecks: m }
+  }),
+  setPayProfile: (staffId, patch) => set((st) => {
+    const next = { ...st.payProfiles, [staffId]: { ...(st.payProfiles[staffId] ?? {}), ...patch } }
+    persistPayProfiles(next)
+    return { payProfiles: next }
   }),
   addCashOpType: (c) => set((st) => {
     const id = (c.direction === 'in' ? 'ci-' : 'co-') + (st.cashOpTypes.length + 1)

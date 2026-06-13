@@ -1,18 +1,22 @@
 import { useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
 import { Megaphone, Calendar, Trophy } from 'lucide-react'
-import { usePos, lineTotal } from '../store/pos'
+import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
 import { findDish } from '../mock/menu'
 import { attendance } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import TopBar from '../components/TopBar'
 
-const HOUR_RATE = 1500 // ставка повременной оплаты, ₸/час (демо)
-
 // Личная страница (iikoFront): результат работы по датам + итоги месяца (ЛП/СПЧ) + мотивация + управление личной сменой.
 export default function PersonalPageScreen() {
   const navigate = useNavigate()
-  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms, salaryDeductions } = usePos()
+  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms, salaryDeductions, payProfiles } = usePos()
+
+  // профиль оплаты сотрудника — те же значения, что выставил офис (из стора)
+  const profile = (user && payProfiles[user.id]) || {}
+  const payMode = profile.mode ?? defaultPayMode(user?.positions ?? [])
+  const hourRate = profile.rate ?? DEFAULT_HOUR_RATE
+  const oklad = profile.oklad ?? DEFAULT_OKLAD
 
   // отработанные часы из явок (тот же справочник, что и в офисной зарплате) → повременная оплата
   const hhmm2min = (t?: string) => { const m = /^(\d{1,2}):(\d{2})/.exec((t ?? '').trim()); return m ? +m[1] * 60 + +m[2] : null }
@@ -127,13 +131,15 @@ export default function PersonalPageScreen() {
           </div>
 
           {(() => {
-            const hourly = Math.round(myHours * HOUR_RATE)
+            const base = payMode === 'hourly' ? Math.round(myHours * hourRate) : oklad
             const fines = salaryDeductions.filter((d) => d.staffId === user?.id).reduce((s, d) => s + d.amount, 0)
-            const total = +(hourly + motivationTotal - fines).toFixed(0)
+            const total = +(base + motivationTotal - fines).toFixed(0)
             return (
               <div className="bg-white/5 rounded-lg p-4 max-w-md">
                 <div className="text-pos-accent text-sm uppercase mb-2">Начисления (из явок и продаж)</div>
-                <Row k={`Повременная (${myHours} ч × ${formatTenge(HOUR_RATE)})`} v={formatTenge(hourly)} />
+                {payMode === 'hourly'
+                  ? <Row k={`Повременная (${myHours} ч × ${formatTenge(hourRate)})`} v={formatTenge(base)} />
+                  : <Row k="Оклад" v={formatTenge(base)} />}
                 <Row k="Премия за продажи" v={formatTenge(motivationTotal)} />
                 <Row k="Штрафы" v={fines > 0 ? '− ' + formatTenge(fines) : formatTenge(0)} />
                 <Row k="Итого начислено" v={formatTenge(total)} bold />
