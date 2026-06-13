@@ -131,6 +131,18 @@ function loadOrderTypes(): OrderTypeDef[] {
 function persistOrderTypes(list: OrderTypeDef[]) {
   try { localStorage.setItem('iiko-order-types', JSON.stringify(list)) } catch { /* ignore */ }
 }
+// Сотрудники доп. (Phase 5): типы смен (расписание) + медкнижки (сроки).
+type ShiftType = { id: string; name: string; from: string; to: string }
+function loadShiftTypes(): ShiftType[] {
+  try { const raw = localStorage.getItem('iiko-shift-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return [{ id: 'sh-day', name: 'Дневная', from: '09:00', to: '18:00' }, { id: 'sh-eve', name: 'Вечерняя', from: '14:00', to: '23:00' }]
+}
+function persistShiftTypes(list: ShiftType[]) { try { localStorage.setItem('iiko-shift-types', JSON.stringify(list)) } catch { /* ignore */ } }
+function loadMedChecks(): Record<string, string> {
+  try { const raw = localStorage.getItem('iiko-med-checks'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistMedChecks(m: Record<string, string>) { try { localStorage.setItem('iiko-med-checks', JSON.stringify(m)) } catch { /* ignore */ } }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
@@ -281,6 +293,8 @@ interface PosState {
   salaryPayouts: SalaryPayout[] // выплаты сотрудникам (аванс/расчёт)
   salaryPayoutSeq: number
   orderTypes: OrderTypeDef[] // типы заказов (Розничные продажи, topic-112) — режим/налог/по умолчанию
+  shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
+  medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -384,6 +398,9 @@ interface PosState {
   updateOrderType: (id: string, patch: Partial<OrderTypeDef>) => void
   removeOrderType: (id: string) => void
   setDefaultOrderType: (id: string) => void
+  addShiftType: (name: string, from: string, to: string) => void
+  removeShiftType: (id: string) => void
+  setMedCheck: (staffId: string, expiry: string) => void
   addCashOpType: (c: Omit<CashOpType, 'id'>) => void
   removeCashOpType: (id: string) => void
   addWriteoffReason: (name: string) => void
@@ -458,6 +475,8 @@ export const usePos = create<PosState>((set, get) => ({
   salaryPayouts: loadSalary(),
   salaryPayoutSeq: loadSalary().length,
   orderTypes: loadOrderTypes(),
+  shiftTypes: loadShiftTypes(),
+  medChecks: loadMedChecks(),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -1053,6 +1072,21 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.orderTypes.map((o) => ({ ...o, isDefault: o.id === id }))
     persistOrderTypes(list)
     return { orderTypes: list }
+  }),
+  addShiftType: (name, from, to) => set((st) => {
+    const list = [...st.shiftTypes, { id: 'sh-' + (st.shiftTypes.length + 1), name, from, to }]
+    persistShiftTypes(list)
+    return { shiftTypes: list }
+  }),
+  removeShiftType: (id) => set((st) => {
+    const list = st.shiftTypes.filter((s) => s.id !== id)
+    persistShiftTypes(list)
+    return { shiftTypes: list }
+  }),
+  setMedCheck: (staffId, expiry) => set((st) => {
+    const m = { ...st.medChecks, [staffId]: expiry }
+    persistMedChecks(m)
+    return { medChecks: m }
   }),
   addCashOpType: (c) => set((st) => {
     const id = (c.direction === 'in' ? 'ci-' : 'co-') + (st.cashOpTypes.length + 1)

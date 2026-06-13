@@ -87,6 +87,7 @@ export default function OfficeScreen() {
     salaryPayouts, paySalary, cashMovements, writeOffs, cashShift,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
+    shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
@@ -131,6 +132,7 @@ export default function OfficeScreen() {
   const [newCat, setNewCat] = useState('')
   const [journalCat, setJournalCat] = useState<string>('all') // фильтр журнала событий
   const [financeTab, setFinanceTab] = useState<'book' | 'cashflow'>('book')
+  const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
   const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
@@ -754,6 +756,51 @@ export default function OfficeScreen() {
                       ))}
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Phase 5: типы смен (расписание) */}
+            <div className="text-gray-500 text-xs uppercase mb-2 mt-8">Типы смен (расписание)</div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {shiftTypes.map((s) => (
+                <span key={s.id} className="inline-flex items-center gap-2 h-9 px-3 rounded bg-white border border-gray-200 text-sm">
+                  {s.name} <span className="text-gray-400">{s.from}–{s.to}</span>
+                  <button onClick={() => removeShiftType(s.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                </span>
+              ))}
+              {shiftTypes.length === 0 && <span className="text-gray-400 text-sm">Типов смен нет.</span>}
+            </div>
+            <div className="flex items-end gap-2 mb-6">
+              <input value={newSh.name} onChange={(e) => setNewSh({ ...newSh, name: e.target.value })} placeholder="Название (напр. Ночная)" className="h-9 rounded border border-gray-300 px-2 w-52" />
+              <input type="time" value={newSh.from} onChange={(e) => setNewSh({ ...newSh, from: e.target.value })} className="h-9 rounded border border-gray-300 px-2" />
+              <input type="time" value={newSh.to} onChange={(e) => setNewSh({ ...newSh, to: e.target.value })} className="h-9 rounded border border-gray-300 px-2" />
+              <button onClick={() => { if (newSh.name.trim()) { addShiftType(newSh.name.trim(), newSh.from, newSh.to); setNewSh({ name: '', from: '09:00', to: '18:00' }) } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить смену</button>
+            </div>
+
+            {/* Phase 5: медкнижки (сроки) */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Медкнижки (сроки действия)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Сотрудник</th><th>Действует до</th><th className="text-right p-2">Статус</th></tr></thead>
+                <tbody>
+                  {staffList.map((s) => {
+                    const exp = medChecks[s.id] ?? ''
+                    const today = todayISO()
+                    const days = exp ? Math.round((fromISO(exp).getTime() - fromISO(today).getTime()) / 86400000) : null
+                    return (
+                      <tr key={s.id} className="border-b border-gray-100 last:border-0">
+                        <td className="p-2">{s.name}</td>
+                        <td><input type="date" value={exp} onChange={(e) => setMedCheck(s.id, e.target.value)} className="h-8 rounded border border-gray-200 px-2" /></td>
+                        <td className="text-right p-2">
+                          {days == null ? <span className="text-gray-300 text-xs">не задана</span>
+                            : days < 0 ? <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">просрочена</span>
+                            : days <= 30 ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">истекает через {days} дн.</span>
+                            : <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">действует</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
