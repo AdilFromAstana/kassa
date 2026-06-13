@@ -90,6 +90,8 @@ export interface OrderLine {
   guestNo?: number // для деления между гостями
   comment?: string // комментарий к позиции (печатается на марке кухни)
   course?: number  // курс подачи (1/2/3…); не задан = без курса
+  kitchenStatus?: 'new' | 'cooking' | 'ready' | 'served' // кухонный статус блюда (KDS)
+  firedAt?: string // время отправки на кухню (ЧЧ:ММ) — для таймера/просрочки
 }
 
 export type OrderType = 'dinein' | 'takeaway' | 'delivery'

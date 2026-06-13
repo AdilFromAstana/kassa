@@ -5,6 +5,7 @@ import { usePos, lineTotal, orderSubtotal, orderTotal, isStopped } from '../stor
 import { groupsByPage, dishesByGroup, findDish } from '../mock/menu'
 import { dishMaxPortions } from '../mock/warehouse'
 import { formatTenge } from '../lib/money'
+import { minutesSince } from '../lib/date'
 import { printToast } from '../lib/print'
 import ModifiersModal from '../components/ModifiersModal'
 import TransferModal from '../components/TransferModal'
@@ -88,6 +89,12 @@ export default function OrderScreen() {
     }
     const parts = Object.entries(byStation).map(([st, items]) => `${st}:\n${items.join('\n')}`)
     if (!parts.length) { printToast('Нет позиций для кухни/бара'); return }
+    // отправка на кухню (KDS): новые позиции со станцией → «готовится» (старт таймера)
+    if (est.kitchenScreen) {
+      for (const l of src) {
+        if (stationOf(findDish(l.dishId)?.groupId) && (!l.kitchenStatus || l.kitchenStatus === 'new')) pos.cycleKitchen(l.uid)
+      }
+    }
     printToast(`Сервисный чек${selUid ? ' (выделенное)' : ''} · ${tableLabel}\n${parts.join('\n\n')}`)
   }
 
@@ -158,6 +165,26 @@ export default function OrderScreen() {
                   </div>
                 )}
                 {l.comment && <div className="text-xs text-pos-blue italic pl-6 flex items-center gap-1"><MessageSquare size={11} />{l.comment}</div>}
+                {est.kitchenScreen && l.kitchenStatus && l.kitchenStatus !== 'new' && (() => {
+                  const overdue = l.kitchenStatus === 'cooking' && l.firedAt && minutesSince(l.firedAt) > 15
+                  const meta: Record<string, { t: string; c: string }> = {
+                    cooking: { t: 'готовится', c: 'bg-amber-400 text-gray-900' },
+                    ready: { t: 'готово', c: 'bg-pos-green text-white' },
+                    served: { t: 'подано', c: 'bg-pos-blue text-white' },
+                  }
+                  const m = meta[l.kitchenStatus]
+                  return (
+                    <div className="pl-6 mt-0.5 flex items-center gap-1.5">
+                      <button onClick={(e) => { e.stopPropagation(); pos.cycleKitchen(l.uid) }}
+                        className={`text-[10px] px-1.5 py-0.5 rounded ${m.c}`}>{m.t}</button>
+                      {l.kitchenStatus === 'cooking' && l.firedAt && (
+                        <span className={`text-[10px] ${overdue ? 'text-pos-rose font-semibold' : 'text-gray-400'}`}>
+                          {overdue ? `⏱ просрочка ${minutesSince(l.firedAt)}′` : `⏱ ${minutesSince(l.firedAt)}′`}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>

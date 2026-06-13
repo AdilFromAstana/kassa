@@ -291,6 +291,7 @@ interface PosState {
   setGuestNo: (uid: string, guestNo: number | undefined) => void
   setLineComment: (uid: string, comment: string) => void
   setLineCourse: (uid: string, course: number | undefined) => void
+  cycleKitchen: (uid: string) => void // продвинуть кухонный статус блюда (new→cooking→ready→served)
   setOrderWaiter: (orderId: number, waiter: string) => void
   setOrderType: (orderId: number, type: OrderType) => void
   setDiscount: (pct: number) => void
@@ -560,6 +561,18 @@ export const usePos = create<PosState>((set, get) => ({
     orders: st.orders.map((o) => o.id === st.currentOrderId
       ? { ...o, lines: o.lines.map((l) => (l.uid === uid ? { ...l, course } : l)) } : o),
   })),
+  cycleKitchen: (uid) => set((st) => {
+    const next: Record<string, 'new' | 'cooking' | 'ready' | 'served'> = { new: 'cooking', cooking: 'ready', ready: 'served', served: 'new' }
+    const hm = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    return {
+      orders: st.orders.map((o) => o.id === st.currentOrderId
+        ? { ...o, lines: o.lines.map((l) => {
+            if (l.uid !== uid) return l
+            const status = next[l.kitchenStatus ?? 'new']
+            return { ...l, kitchenStatus: status, firedAt: status === 'cooking' ? hm : l.firedAt }
+          }) } : o),
+    }
+  }),
   setOrderWaiter: (orderId, waiter) => set((st) => ({
     orders: st.orders.map((o) => (o.id === orderId ? { ...o, waiter } : o)),
   })),
