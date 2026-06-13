@@ -21,6 +21,7 @@ import MessagesScreen from './screens/MessagesScreen'
 import ExtrasScreen from './screens/ExtrasScreen'
 import SettingsScreen from './screens/SettingsScreen'
 import WarehouseScreen from './screens/WarehouseScreen'
+import DocumentsScreen from './screens/DocumentsScreen'
 
 // HashRouter — чтобы работало как статика (file://) при встраивании в Electron.
 export const router = createHashRouter([
@@ -46,4 +47,5 @@ export const router = createHashRouter([
   { path: '/extras', element: <ExtrasScreen /> },
   { path: '/settings', element: <SettingsScreen /> },
   { path: '/warehouse', element: <WarehouseScreen /> },
+  { path: '/documents', element: <DocumentsScreen /> },
 ])

@@ -1,13 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PackagePlus, RotateCcw, AlertTriangle } from 'lucide-react'
+import { RotateCcw, AlertTriangle } from 'lucide-react'
 import BackButton from '../components/BackButton'
-import QuantityModal from '../components/QuantityModal'
 import { usePos } from '../store/pos'
 import { dishes } from '../mock/menu'
 import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
 import { formatTenge } from '../lib/money'
-import type { Ingredient } from '../types'
 
 // «Товары и склады» (iikoOperation, упрощённо): остатки товаров-ингредиентов + техкарты блюд.
 // Остаток списывается по техкарте при оплате заказа на кассе. См. iiko_spec/04_tovary_i_sklady.md.
@@ -15,10 +13,8 @@ type Tab = 'stock' | 'tech'
 
 export default function WarehouseScreen() {
   const navigate = useNavigate()
-  const { ingredients, receiveStock, setIngredientStock, resetStock } = usePos()
+  const { ingredients, resetStock } = usePos()
   const [tab, setTab] = useState<Tab>('stock')
-  // модалка прихода/инвентаризации: { ing, mode }
-  const [edit, setEdit] = useState<{ ing: Ingredient; mode: 'receive' | 'set' } | null>(null)
 
   const lowCount = ingredients.filter((i) => i.stock < i.min).length
 
@@ -56,7 +52,6 @@ export default function WarehouseScreen() {
                 <th className="py-2 px-2 text-right">Остаток</th>
                 <th className="py-2 px-2 text-right">Мин.</th>
                 <th className="py-2 px-2 text-right">Стоимость остатка</th>
-                <th className="py-2 px-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -74,22 +69,14 @@ export default function WarehouseScreen() {
                     </td>
                     <td className="py-1.5 px-2 text-right text-white/40">{fmt(i.min)}</td>
                     <td className="py-1.5 px-2 text-right text-white/70">{formatTenge(Math.max(0, i.stock) * i.costPerUnit)}</td>
-                    <td className="py-1.5 px-2 text-right whitespace-nowrap">
-                      <button onClick={() => setEdit({ ing: i, mode: 'receive' })}
-                        className="inline-flex items-center gap-1 text-pos-green hover:underline mr-3" title="Приходная накладная">
-                        <PackagePlus size={15} />Приход
-                      </button>
-                      <button onClick={() => setEdit({ ing: i, mode: 'set' })}
-                        className="text-white/50 hover:text-white" title="Инвентаризация — выставить факт">Факт</button>
-                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
           <div className="text-white/40 text-xs mt-3">
-            «Приход» = приходная накладная (увеличивает остаток). «Факт» = инвентаризация (выставить фактический остаток).
-            При оплате заказа на кассе ингредиенты списываются по техкарте. Красный — отрицательный остаток, оранжевый — ниже минимума.
+            Просмотр остатков. Складские операции (списание, инвентаризация, перемещение, приготовление) — в разделе «Документы».
+            При оплате заказа ингредиенты списываются по техкарте. Красный — отрицательный остаток, оранжевый — ниже минимума.
           </div>
         </div>
       )}
@@ -147,20 +134,6 @@ export default function WarehouseScreen() {
       <div className="h-16 bg-white text-gray-700 flex items-center px-4">
         <BackButton onClick={() => navigate('/menu')} />
       </div>
-
-      {edit && (
-        <QuantityModal
-          dishName={`${edit.mode === 'receive' ? 'Приход' : 'Инвентаризация (факт)'} · ${edit.ing.name}`}
-          unit={edit.ing.unit.toUpperCase()}
-          value={edit.mode === 'receive' ? 0 : edit.ing.stock}
-          onOk={(n) => {
-            if (edit.mode === 'receive') { if (n > 0) receiveStock(edit.ing.id, n) }
-            else setIngredientStock(edit.ing.id, n)
-            setEdit(null)
-          }}
-          onCancel={() => setEdit(null)}
-        />
-      )}
     </div>
   )
 }

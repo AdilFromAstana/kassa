@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type {
-  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem,
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff,
 } from '../types'
@@ -100,6 +100,8 @@ interface PosState {
   cashMovements: CashMovement[]
   refunds: Refund[]
   writeOffs: WriteOff[] // акты списания блюд (для отчётов 024/034/037)
+  documents: StoreDoc[] // складские документы кассы (Документы)
+  docSeq: number
   banquets: Banquet[]
   closedShifts: ClosedShift[] // архив закрытых кассовых смен
   stopList: StopItem[] // стоп-лист: dishId + остаток порций + кто/когда внёс
@@ -147,6 +149,7 @@ interface PosState {
   removeStop: (dishId: string) => void
   setStopRemaining: (dishId: string, remaining: number) => void
   can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
+  createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
 
   // склад
@@ -174,6 +177,8 @@ export const usePos = create<PosState>((set, get) => ({
   cashMovements: DEMO_INIT?.cashMovements ?? [],
   refunds: [],
   writeOffs: DEMO_INIT?.writeOffs ?? [],
+  documents: [],
+  docSeq: 0,
   banquets: initialBanquets,
   closedShifts: [],
   stopList: [],
@@ -450,6 +455,25 @@ export const usePos = create<PosState>((set, get) => ({
   setStopRemaining: (dishId, remaining) =>
     set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
   can: (code) => hasRight(get().user?.positions, code),
+
+  // Складской документ кассы. Инвентаризация выставляет фактический остаток, остальные — расход.
+  createStoreDoc: (type, lines, opts) => {
+    const doc: StoreDoc = {
+      id: get().docSeq + 1, type, at: fullNow(), by: get().user?.name ?? '—',
+      store: opts?.store ?? 'Основной', reason: opts?.reason, lines,
+    }
+    set((st) => {
+      const ingredients = st.ingredients.map((i) => {
+        const l = lines.find((x) => x.ingredientId === i.id)
+        if (!l) return i
+        const stock = type === 'Инвентаризация' ? l.qty : +(i.stock - l.qty).toFixed(3)
+        return { ...i, stock }
+      })
+      persistIngredients(ingredients)
+      return { documents: [doc, ...st.documents], docSeq: st.docSeq + 1, ingredients }
+    })
+    return doc
+  },
 
   setEstablishment: (patch) => set((st) => {
     const next = { ...st.establishment, ...patch }

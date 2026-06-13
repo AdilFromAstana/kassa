@@ -133,6 +133,28 @@ export interface WriteOff {
   at: string
 }
 
+// Складские документы на кассе (iikoFront «Документы»). Каждая операция — отдельный документ.
+// Приходной накладной на терминале нет (это офис). См. iiko_spec/04_tovary_i_sklady.md.
+export type DocType =
+  | 'Акт списания'
+  | 'Акт приготовления'
+  | 'Акт переработки'
+  | 'Внутреннее перемещение'
+  | 'Расходная накладная'
+  | 'Инвентаризация'
+
+export interface DocLine { ingredientId: string; name: string; unit: string; qty: number }
+
+export interface StoreDoc {
+  id: number
+  type: DocType
+  at: string
+  by: string         // кто оформил
+  store: string      // склад
+  reason?: string    // причина (для акта списания)
+  lines: DocLine[]
+}
+
 export interface Staff {
   id: string
   name: string

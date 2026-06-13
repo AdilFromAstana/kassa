@@ -86,6 +86,7 @@ export default function MainMenuScreen() {
           <div className="grid grid-cols-1">
             <Tile c={{ label: 'Отчеты', onClick: () => navigate('/reports') }} />
             <Tile c={{ label: 'Стоп-лист', onClick: () => navigate('/stoplist') }} />
+            <Tile c={{ label: 'Документы', onClick: () => navigate('/documents') }} />
           </div>
         </div>
 
