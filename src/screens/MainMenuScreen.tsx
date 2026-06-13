@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Lock, ListOrdered, Receipt, Puzzle, Wrench, Power, TriangleAlert } from 'lucide-react'
 import { usePos } from '../store/pos'
+import { attendance } from '../mock/data'
 import { printToast } from '../lib/print'
 import CashMovementModal from '../components/CashMovementModal'
 import OpenShiftModal from '../components/OpenShiftModal'
@@ -17,6 +18,9 @@ export default function MainMenuScreen() {
   const isRest = est.mode === 'restaurant'
   const [cashModal, setCashModal] = useState<'in' | 'out' | null>(null)
   const [openShift, setOpenShift] = useState(false)
+  const [onShift, setOnShift] = useState(false)
+  // сотрудники на смене: явки с приходом и без ухода (отработано)
+  const onShiftStaff = attendance.filter((a) => a.in && !a.out && a.type === 'Отработано')
 
   // нет кассира — на вход (иначе вверху «undefined»)
   useEffect(() => { if (!user) navigate('/') }, [user, navigate])
@@ -78,6 +82,7 @@ export default function MainMenuScreen() {
 
           <div className="border border-gray-300">
             <Header title="ПЕРСОНАЛ" color="#8a6fae" />
+            <Tile c={{ label: `Сотрудники на смене (${onShiftStaff.length})`, onClick: () => setOnShift(true) }} />
             <Tile c={{ label: 'Редактировать явки', onClick: () => navigate('/attendance'), disabled: !pos.can('F_CVS') }} />
           </div>
         </div>
@@ -142,6 +147,33 @@ export default function MainMenuScreen() {
 
       {!cashShift && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-pos-accent text-sm flex items-center gap-2"><TriangleAlert size={16} /> Кассовая смена не открыта — откройте её, чтобы принимать заказы</div>
+      )}
+      {onShift && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-40" onClick={() => setOnShift(false)}>
+          <div className="bg-white text-gray-800 rounded-lg w-[420px] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b font-semibold">Сотрудники на смене · {onShiftStaff.length}</div>
+            <div className="flex-1 overflow-auto">
+              {onShiftStaff.length === 0 ? <div className="p-5 text-gray-400 text-sm">Нет открытых явок.</div> : (
+                <table className="w-full text-sm">
+                  <thead className="text-gray-400 text-left"><tr><th className="px-4 py-2">Сотрудник</th><th>Должность</th><th className="text-right px-4">Приход</th></tr></thead>
+                  <tbody>
+                    {onShiftStaff.map((a) => (
+                      <tr key={a.staff} className="border-t border-gray-100">
+                        <td className="px-4 py-2">{a.staff}{a.staff === user?.name ? ' (вы)' : ''}</td>
+                        <td>{a.position}</td>
+                        <td className="text-right px-4 text-gray-500">{a.in}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t flex justify-end gap-2">
+              <button onClick={() => navigate('/attendance')} className="h-10 px-4 rounded-md border border-gray-300 hover:bg-gray-100">К явкам</button>
+              <button onClick={() => setOnShift(false)} className="h-10 px-5 rounded-md bg-pos-blue text-white">Закрыть</button>
+            </div>
+          </div>
+        </div>
       )}
       {cashModal && <CashMovementModal kind={cashModal} onClose={() => setCashModal(null)} />}
       {openShift && (
