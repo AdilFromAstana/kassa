@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { usePos } from '../store/pos'
 import { staff } from '../mock/data'
-import { hasRight } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 
 // Возврат оплаты (FRONT_03) — 1:1 с iikoFront: (опц. выбор позиций) → причина →
@@ -25,6 +24,7 @@ export default function RefundModal({
   onCancel: () => void
 }) {
   const user = usePos((s) => s.user)
+  const hasRightFor = usePos((s) => s.hasRightFor)
   const [reason, setReason] = useState('')
   const [restock, setRestock] = useState(false)
   const [manager, setManager] = useState('') // карта менеджера, если у текущего юзера нет права
@@ -32,8 +32,8 @@ export default function RefundModal({
     () => Object.fromEntries((lines ?? []).map((l) => [l.uid, true])))
 
   const need = restock ? 'F_STRN' : 'F_SWWOFF'
-  const selfOk = hasRight(user?.positions, need)
-  const managers = staff.filter((s) => hasRight(s.positions, need))
+  const selfOk = hasRightFor(user?.positions, need)
+  const managers = staff.filter((s) => hasRightFor(s.positions, need))
   const by = selfOk ? (user?.name ?? '') : manager
 
   const pickedUids = (lines ?? []).filter((l) => picked[l.uid]).map((l) => l.uid)

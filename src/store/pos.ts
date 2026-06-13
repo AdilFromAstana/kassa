@@ -6,7 +6,7 @@ import type {
 } from '../types'
 import { findDish } from '../mock/menu'
 import { findStaffByPin, initialBanquets } from '../mock/data'
-import { hasRight } from '../lib/rights'
+import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
@@ -49,6 +49,14 @@ function loadEstablishment(): Establishment {
 function loadPriceOverrides(): Record<string, number> {
   try { const raw = localStorage.getItem('iiko-menu-prices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
+}
+
+// Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
+function loadRoleRights(): Record<string, string[]> {
+  const base: Record<string, string[]> = {}
+  for (const k of Object.keys(POSITION_RIGHTS)) base[k] = [...POSITION_RIGHTS[k]]
+  try { const raw = localStorage.getItem('iiko-role-rights'); if (raw) return { ...base, ...JSON.parse(raw) } } catch { /* ignore */ }
+  return base
 }
 
 // Остатки склада: база из warehouse.ts, поверх — сохранённые остатки из localStorage (id → stock).
@@ -114,6 +122,7 @@ interface PosState {
   ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
+  roleRights: Record<string, string[]> // карта должность→права (из офиса)
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -157,6 +166,8 @@ interface PosState {
   removeStop: (dishId: string) => void
   setStopRemaining: (dishId: string, remaining: number) => void
   can: (code: string) => boolean // право текущего пользователя (F_*) по его должности
+  hasRightFor: (positions: string[] | undefined, code: string) => boolean // право для произвольных должностей
+  toggleRoleRight: (position: string, code: string) => void // правка карты прав в офисе
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
@@ -195,6 +206,7 @@ export const usePos = create<PosState>((set, get) => ({
   ingredients: loadIngredients(),
   establishment: loadEstablishment(),
   priceOverrides: loadPriceOverrides(),
+  roleRights: loadRoleRights(),
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -469,7 +481,15 @@ export const usePos = create<PosState>((set, get) => ({
     set((st) => ({ stopList: st.stopList.filter((s) => s.dishId !== dishId) })),
   setStopRemaining: (dishId, remaining) =>
     set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId ? { ...s, remaining } : s)) })),
-  can: (code) => hasRight(get().user?.positions, code),
+  can: (code) => hasRightIn(get().roleRights, get().user?.positions, code),
+  hasRightFor: (positions, code) => hasRightIn(get().roleRights, positions, code),
+  toggleRoleRight: (position, code) => set((st) => {
+    const cur = st.roleRights[position] ?? []
+    const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]
+    const next = { ...st.roleRights, [position]: nextList }
+    try { localStorage.setItem('iiko-role-rights', JSON.stringify(next)) } catch { /* ignore */ }
+    return { roleRights: next }
+  }),
 
   // Складской документ кассы. Инвентаризация выставляет фактический остаток, остальные — расход.
   createStoreDoc: (type, lines, opts) => {

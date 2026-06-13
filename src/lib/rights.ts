@@ -25,9 +25,9 @@ export const RIGHTS: Record<string, string> = {
   F_AOT: 'Заказы других официантов',
 }
 
-// Должность → набор прав (мок-модель ролей). Официант/бармен — без кассовых операций,
-// скидок, возвратов и явок; кассир — кассовые операции; менеджер — всё.
-const POSITION_RIGHTS: Record<string, string[]> = {
+// Должность → набор прав ПО УМОЛЧАНИЮ (мок-модель ролей; в офисе можно переопределить).
+// Официант/бармен — без кассовых операций, скидок, возвратов и явок; кассир — кассовые; менеджер — всё.
+export const POSITION_RIGHTS: Record<string, string[]> = {
   Официант: ['F_CHO', 'F_CPBA', 'F_VRS'],
   Бармен: ['F_CHO', 'F_CPBA', 'F_VRS'],
   Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT'],
@@ -37,5 +37,13 @@ const POSITION_RIGHTS: Record<string, string[]> = {
   ],
 }
 
+// Должности в порядке для UI матрицы прав в офисе.
+export const POSITIONS = Object.keys(POSITION_RIGHTS)
+
+// Проверка по произвольной карте роль→права (карта приходит из стора, чтобы офис мог менять).
+export const hasRightIn = (roleRights: Record<string, string[]>, positions: string[] | undefined, code: string): boolean =>
+  (positions ?? []).some((p) => (roleRights[p] ?? []).includes(code))
+
+// Дефолтная проверка (по встроенной карте) — фолбэк.
 export const hasRight = (positions: string[] | undefined, code: string): boolean =>
-  (positions ?? []).some((p) => (POSITION_RIGHTS[p] ?? []).includes(code))
+  hasRightIn(POSITION_RIGHTS, positions, code)

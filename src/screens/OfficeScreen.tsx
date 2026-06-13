@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Check, Monitor } from 'lucide-react'
 import { usePos } from '../store/pos'
 import { menuGroups, dishesByGroup } from '../mock/menu'
+import { staff } from '../mock/data'
+import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 import type { Establishment } from '../types'
 
@@ -22,18 +24,18 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu'
+type Section = 'settings' | 'menu' | 'staff'
 const NAV: { id: Section | null; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
+  { id: 'staff', label: 'Сотрудники и права' },
   { id: null, label: 'Номенклатура и техкарты' },
-  { id: null, label: 'Сотрудники и права' },
   { id: null, label: 'Отчёты' },
 ]
 
 export default function OfficeScreen() {
   const navigate = useNavigate()
-  const { establishment: est, setEstablishment, priceOf, setDishPrice } = usePos()
+  const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight } = usePos()
   const [section, setSection] = useState<Section>('settings')
 
   const Toggle = ({ k, label, note }: { k: keyof Establishment; label: string; note: string }) => (
@@ -73,7 +75,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : 'Меню и цены'}</div>
+          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : 'Сотрудники и права'}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -114,7 +116,7 @@ export default function OfficeScreen() {
               </div>
             </div>
           </div>
-        ) : (
+        ) : section === 'menu' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               Цены меню. Изменённая цена сразу применяется на кассе (для новых позиций в заказе). Услуги без цены тоже здесь.
@@ -147,6 +149,49 @@ export default function OfficeScreen() {
                 </div>
               )
             })}
+          </div>
+        ) : (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Роли и права (как в iikoOffice). Галочки задают, что разрешено должности; касса применяет сразу
+              (стоп-лист, возврат, смена, деньги, скидки, отчёты, явки и т.д.).
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Сотрудники</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-6">
+              {staff.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 px-4 h-12 border-b border-gray-100 last:border-0">
+                  <span className="flex-1">{s.name}</span>
+                  <span className="text-xs text-gray-400">PIN {s.pin}</span>
+                  <span className="text-sm text-gray-600">{s.positions.join(', ')}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Права по должностям</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-500 text-left border-b border-gray-200">
+                    <th className="p-2 font-medium">Право</th>
+                    {POSITIONS.map((p) => <th key={p} className="p-2 font-medium text-center">{p}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(RIGHTS).map(([code, label]) => (
+                    <tr key={code} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2"><span className="font-mono text-xs text-gray-400 mr-2">{code}</span>{label}</td>
+                      {POSITIONS.map((p) => (
+                        <td key={p} className="p-2 text-center">
+                          <input type="checkbox" checked={(roleRights[p] ?? []).includes(code)}
+                            onChange={() => toggleRoleRight(p, code)} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
