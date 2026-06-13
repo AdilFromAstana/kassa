@@ -147,7 +147,7 @@ export default function PaymentScreen() {
     pos.fiscalizeOrder()
   }
 
-  const tableLabel = order!.tableId ? `Стол #${findTable(order!.tableId)?.no ?? order!.tableId.replace(/^t-/, '')}` : 'Быстрый чек'
+  const tableLabel = order!.tabName ? `Tab: ${order!.tabName}` : order!.tableId ? `Стол #${findTable(order!.tableId)?.no ?? order!.tableId.replace(/^t-/, '')}` : 'Быстрый чек'
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">

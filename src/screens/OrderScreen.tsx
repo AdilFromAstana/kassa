@@ -109,7 +109,7 @@ export default function OrderScreen() {
   const guestList = Array.from({ length: order.guests }, (_, i) => i + 1)
   const guestLines = order.lines.filter((l) => guestOf(l.guestNo) === activeGuest)
   const guestSum = (g: number) => order.lines.filter((l) => guestOf(l.guestNo) === g).reduce((s, l) => s + lineTotal(l), 0)
-  const tableLabel = order.tableId ? `Стол ${order.tableId.replace(/^t-/, '')}` : 'Не задан'
+  const tableLabel = order.tabName ? `Tab: ${order.tabName}` : order.tableId ? `Стол ${order.tableId.replace(/^t-/, '')}` : 'Не задан'
 
   const GuestTab = ({ g }: { g: number }) => (
     <button onClick={() => { setActiveGuest(g); setSelUid(null) }}
@@ -288,6 +288,7 @@ export default function OrderScreen() {
               { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
               { label: 'Сменить официанта', on: () => setWaiterPick(true), disabled: false },
               { label: `Тип заказа: ${TYPE_LABEL[order.type]}`, on: () => setTypePick(true), disabled: false },
+              ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { const n = window.prompt('Название барного счёта (имя гостя/карта):', order.tabName ?? ''); if (n != null) pos.setOrderTab(order.id, n.trim() || undefined) }, disabled: false }] : []),
               ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
               { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },

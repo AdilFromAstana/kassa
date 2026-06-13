@@ -294,6 +294,7 @@ interface PosState {
   cycleKitchen: (uid: string) => void // продвинуть кухонный статус блюда (new→cooking→ready→served)
   setOrderWaiter: (orderId: number, waiter: string) => void
   setOrderType: (orderId: number, type: OrderType) => void
+  setOrderTab: (orderId: number, tabName: string | undefined) => void // барный счёт (Tab)
   setDiscount: (pct: number) => void
   setSurcharge: (pct: number) => void
   precheck: () => void
@@ -578,6 +579,9 @@ export const usePos = create<PosState>((set, get) => ({
   })),
   setOrderType: (orderId, type) => set((st) => ({
     orders: st.orders.map((o) => (o.id === orderId ? { ...o, type } : o)),
+  })),
+  setOrderTab: (orderId, tabName) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === orderId ? { ...o, tabName: tabName || undefined } : o)),
   })),
   setDiscount: (pct) => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, discountPct: pct } : o)),

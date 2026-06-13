@@ -108,6 +108,7 @@ export interface Order {
   surchargePct: number
   openedAt: string
   status: 'open' | 'precheck' | 'fiscalized' | 'paid'
+  tabName?: string // барный счёт (Tab): именованный открытый счёт без стола
 }
 
 export type PaymentKind = 'cash' | 'card' | 'noRevenue' | 'cashless' | 'bonus'
