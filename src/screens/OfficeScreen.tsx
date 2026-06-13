@@ -28,13 +28,14 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal'
+type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'prikazy', label: 'Прейскурант (приказы)' },
   { id: 'retail', label: 'Розничные продажи' },
   { id: 'discount', label: 'Дисконтная система' },
+  { id: 'loyalty', label: 'iikoCard (лояльность)' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
@@ -47,6 +48,7 @@ const SECTION_TITLE: Record<Section, string> = {
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
+  loyalty: 'iikoCard — бонусная программа лояльности и карты гостей',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
   finance: 'Финансы — кассовая книга и ДДС (движение денежных средств)',
   journal: 'Журнал событий — монитор операций',
@@ -73,8 +75,8 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
   'Бухгалтер': ['accounting', 'payroll', 'finance', 'reports', 'stock'],
 }
 
@@ -91,6 +93,7 @@ export default function OfficeScreen() {
     shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
+    loyaltyProgram, loyaltyCards, setLoyaltyProgram, addLoyaltyCard, removeLoyaltyCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
@@ -136,6 +139,7 @@ export default function OfficeScreen() {
   const [newCat, setNewCat] = useState('')
   const [journalCat, setJournalCat] = useState<string>('all') // фильтр журнала событий
   const [financeTab, setFinanceTab] = useState<'book' | 'cashflow'>('book')
+  const [newLc, setNewLc] = useState({ number: '', owner: '', phone: '' })
   const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
@@ -693,6 +697,57 @@ export default function OfficeScreen() {
               </select>
               <button onClick={() => { if (newCard.number.trim() && newCard.discountId) { addClubCard({ number: newCard.number.trim(), owner: newCard.owner.trim(), discountId: newCard.discountId }); setNewCard({ number: '', owner: '', discountId: '' }) } }}
                 className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Выпустить карту</button>
+            </div>
+          </div>
+        ) : section === 'loyalty' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-4">
+              iikoCard (модуль 15) — бонусная программа: начисление % от заказа и оплата бонусами с лимитом. На кассе: «Карта гостя»
+              на заказе → начисление при оплате; тип оплаты «Бонусная карта» → списание бонусов в пределах лимита.
+            </div>
+
+            {/* бонусная программа */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Бонусная программа</div>
+            <div className="bg-white border border-gray-200 rounded-md p-4 mb-6 flex flex-wrap items-end gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={loyaltyProgram.active} onChange={(e) => setLoyaltyProgram({ active: e.target.checked })} />
+                Программа активна
+              </label>
+              <label className="flex flex-col text-xs text-gray-500">Начисление, % от заказа
+                <input type="number" min={0} max={100} value={loyaltyProgram.accrualPct} onChange={(e) => setLoyaltyProgram({ accrualPct: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })} className="mt-1 h-9 w-24 rounded border border-gray-300 px-2 text-right" />
+              </label>
+              <label className="flex flex-col text-xs text-gray-500">Лимит оплаты бонусами, % чека
+                <input type="number" min={0} max={100} value={loyaltyProgram.redeemLimitPct} onChange={(e) => setLoyaltyProgram({ redeemLimitPct: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })} className="mt-1 h-9 w-24 rounded border border-gray-300 px-2 text-right" />
+              </label>
+              <label className="flex flex-col text-xs text-gray-500">Приветственный бонус, ₸
+                <input type="number" min={0} value={loyaltyProgram.welcomeBonus} onChange={(e) => setLoyaltyProgram({ welcomeBonus: Math.max(0, parseFloat(e.target.value) || 0) })} className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right" />
+              </label>
+            </div>
+
+            {/* карты гостей */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Карты гостей (баланс бонусов)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Номер</th><th>Владелец</th><th>Телефон</th><th className="text-right">Баланс бонусов</th><th className="p-2"></th></tr></thead>
+                <tbody>
+                  {loyaltyCards.length === 0 ? <tr><td colSpan={5} className="p-3 text-gray-400">Карт нет.</td></tr> : loyaltyCards.map((c) => (
+                    <tr key={c.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2 font-mono">{c.number}</td>
+                      <td>{c.owner}</td>
+                      <td className="text-gray-500">{c.phone}</td>
+                      <td className="text-right font-medium text-emerald-700">{formatTenge(c.balance)}</td>
+                      <td className="p-2 text-right"><button onClick={() => removeLoyaltyCard(c.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <input value={newLc.number} onChange={(e) => setNewLc({ ...newLc, number: e.target.value })} placeholder="Номер карты" className="h-9 rounded border border-gray-300 px-2 w-36 font-mono" />
+              <input value={newLc.owner} onChange={(e) => setNewLc({ ...newLc, owner: e.target.value })} placeholder="Владелец" className="h-9 rounded border border-gray-300 px-2 flex-1 min-w-[140px]" />
+              <input value={newLc.phone} onChange={(e) => setNewLc({ ...newLc, phone: e.target.value })} placeholder="Телефон" className="h-9 rounded border border-gray-300 px-2 w-44" />
+              <button onClick={() => { if (newLc.number.trim() && newLc.owner.trim()) { addLoyaltyCard({ number: newLc.number.trim(), owner: newLc.owner.trim(), phone: newLc.phone.trim() }); setNewLc({ number: '', owner: '', phone: '' }) } }}
+                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Выпустить карту (+{formatTenge(loyaltyProgram.welcomeBonus)})</button>
             </div>
           </div>
         ) : section === 'staff' ? (

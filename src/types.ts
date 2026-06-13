@@ -119,6 +119,7 @@ export interface Order {
   surchargePct: number
   discountAmount?: number // фикс-сумма скидки на весь заказ, ₸ (после % скидки)
   prepayment?: number     // предоплата/депозит по заказу (напр. из банкета), ₸ — вычитается из суммы к оплате
+  loyaltyCardId?: string  // привязанная карта гостя iikoCard (для начисления/списания бонусов)
   openedAt: string
   status: 'open' | 'precheck' | 'fiscalized' | 'paid'
   tabName?: string // барный счёт (Tab): именованный открытый счёт без стола
@@ -160,6 +161,23 @@ export interface ClubCard {
   number: string
   owner: string
   discountId: string    // тип скидки (из скидок со способом «по карте»)
+}
+
+// iikoCard — карта гостя бонусной программы лояльности (модуль 15). Баланс — в бонусах (1 бонус = 1 ₸).
+export interface LoyaltyCard {
+  id: string
+  number: string
+  owner: string
+  phone: string
+  balance: number       // остаток бонусов, ₸
+}
+
+// Бонусная программа iikoCard (портал iiko.biz). Упрощённо: % начисления + лимит оплаты бонусами.
+export interface LoyaltyProgram {
+  active: boolean
+  accrualPct: number    // «пополнить счёт на % от заказа» — начисление бонусов
+  redeemLimitPct: number // «лимит оплаты от стоимости заказа» — макс. доля оплаты бонусами
+  welcomeBonus: number  // приветственный бонус при выпуске карты
 }
 
 // Тип внесения/изъятия наличных (Розничные продажи → Типы внесений/изъятий, topic-102).

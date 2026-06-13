@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -76,6 +76,13 @@ export const discountSeed: Discount[] = [
 ]
 export const clubCardSeed: ClubCard[] = [
   { id: 'card-1', number: '7700 0001', owner: 'Алия Ж.', discountId: 'd-gold' },
+]
+
+// iikoCard — бонусная программа лояльности (модуль 15) + карты гостей с балансом бонусов.
+export const loyaltyProgramSeed: LoyaltyProgram = { active: true, accrualPct: 5, redeemLimitPct: 50, welcomeBonus: 1000 }
+export const loyaltyCardsSeed: LoyaltyCard[] = [
+  { id: 'lc-1', number: '7711 0001', owner: 'Данияр К.', phone: '+7 701 111 22 33', balance: 4200 },
+  { id: 'lc-2', number: '7711 0002', owner: 'Самал Е.', phone: '+7 705 222 33 44', balance: 750 },
 ]
 
 // Мотивационные программы (раздел 06) — начисление премии за личные продажи.

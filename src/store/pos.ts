@@ -3,11 +3,12 @@ import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
-  MotivationProgram, SalaryDeduction,
+  MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
-  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed } from '../mock/data'
+  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
+  loyaltyProgramSeed, loyaltyCardsSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 import { todayISO } from '../lib/date'
 
@@ -150,6 +151,17 @@ function loadPayProfiles(): Record<string, PayProfile> {
   return {}
 }
 function persistPayProfiles(m: Record<string, PayProfile>) { try { localStorage.setItem('iiko-pay-profiles', JSON.stringify(m)) } catch { /* ignore */ } }
+// iikoCard — бонусная программа + карты гостей (модуль 15).
+function loadLoyaltyProgram(): LoyaltyProgram {
+  try { const raw = localStorage.getItem('iiko-loyalty-program'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return { ...loyaltyProgramSeed }
+}
+function persistLoyaltyProgram(p: LoyaltyProgram) { try { localStorage.setItem('iiko-loyalty-program', JSON.stringify(p)) } catch { /* ignore */ } }
+function loadLoyaltyCards(): LoyaltyCard[] {
+  try { const raw = localStorage.getItem('iiko-loyalty-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return loyaltyCardsSeed.map((c) => ({ ...c }))
+}
+function persistLoyaltyCards(list: LoyaltyCard[]) { try { localStorage.setItem('iiko-loyalty-cards', JSON.stringify(list)) } catch { /* ignore */ } }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
@@ -311,6 +323,8 @@ interface PosState {
   shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
   medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
   payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
+  loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard (офис → касса)
+  loyaltyCards: LoyaltyCard[]    // карты гостей iikoCard с балансом бонусов
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -355,6 +369,11 @@ interface PosState {
   setDiscountAmount: (amount: number) => void          // фикс-сумма скидки на заказ, ₸
   setLineDiscount: (uid: string, pct: number) => void  // скидка на позицию, %
   setOrderPrepayment: (orderId: number, amount: number) => void // предоплата/депозит по заказу
+  setLoyaltyProgram: (patch: Partial<LoyaltyProgram>) => void
+  addLoyaltyCard: (c: Omit<LoyaltyCard, 'id' | 'balance'>) => void
+  removeLoyaltyCard: (id: string) => void
+  attachLoyaltyCard: (orderId: number, cardId: string | undefined) => void
+  adjustBonus: (cardId: string, delta: number) => void // начисление (+) / списание (−) бонусов
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -498,6 +517,8 @@ export const usePos = create<PosState>((set, get) => ({
   shiftTypes: loadShiftTypes(),
   medChecks: loadMedChecks(),
   payProfiles: loadPayProfiles(),
+  loyaltyProgram: loadLoyaltyProgram(),
+  loyaltyCards: loadLoyaltyCards(),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -677,6 +698,30 @@ export const usePos = create<PosState>((set, get) => ({
   setOrderPrepayment: (orderId, amount) => set((st) => ({
     orders: st.orders.map((o) => (o.id === orderId ? { ...o, prepayment: amount || undefined } : o)),
   })),
+  // ───────── iikoCard: бонусная программа + карты гостей ─────────
+  setLoyaltyProgram: (patch) => set((st) => {
+    const p = { ...st.loyaltyProgram, ...patch }
+    persistLoyaltyProgram(p)
+    return { loyaltyProgram: p }
+  }),
+  addLoyaltyCard: (c) => set((st) => {
+    const list = [...st.loyaltyCards, { ...c, id: 'lc-' + (st.loyaltyCards.length + 1), balance: st.loyaltyProgram.welcomeBonus }]
+    persistLoyaltyCards(list)
+    return { loyaltyCards: list }
+  }),
+  removeLoyaltyCard: (id) => set((st) => {
+    const list = st.loyaltyCards.filter((c) => c.id !== id)
+    persistLoyaltyCards(list)
+    return { loyaltyCards: list }
+  }),
+  attachLoyaltyCard: (orderId, cardId) => set((st) => ({
+    orders: st.orders.map((o) => (o.id === orderId ? { ...o, loyaltyCardId: cardId } : o)),
+  })),
+  adjustBonus: (cardId, delta) => set((st) => {
+    const list = st.loyaltyCards.map((c) => (c.id === cardId ? { ...c, balance: +(c.balance + delta).toFixed(2) } : c))
+    persistLoyaltyCards(list)
+    return { loyaltyCards: list }
+  }),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
   })),
