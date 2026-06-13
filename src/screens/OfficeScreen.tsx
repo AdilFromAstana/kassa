@@ -47,6 +47,24 @@ const SECTION_TITLE: Record<Section, string> = {
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
 }
 
+// 🇰🇿 Зарплатные налоги/отчисления РК на 2026 (источник: kgd.gov.kz, mybuh.kz). МРП 4 325 ₸, МЗП 85 000 ₸.
+// Удержания с работника: ОПВ 10%, ВОСМС 2%, ИПН 10% (после вычета ОПВ+ВОСМС+30 МРП).
+// За счёт работодателя: ОПВР 3,5%, ООСМС 3%, СО 5% (от оклада−ОПВ), соцналог 6% (от оклада−ОПВ−ВОСМС) за вычетом СО.
+const MRP_2026 = 4325
+const MZP_2026 = 85000
+function kzTax(okl: number) {
+  const opv = Math.round(Math.min(okl, 50 * MZP_2026) * 0.10)      // макс. база 50 МЗП
+  const vosms = Math.round(Math.min(okl, 20 * MZP_2026) * 0.02)    // макс. база 20 МЗП
+  const ipn = Math.round(Math.max(0, okl - opv - vosms - 30 * MRP_2026) * 0.10) // вычет 30 МРП
+  const net = okl - opv - vosms - ipn                              // на руки
+  const opvr = Math.round(okl * 0.035)                             // взнос работодателя
+  const oosms = Math.round(okl * 0.03)                             // ОСМС работодателя
+  const so = Math.round((okl - opv) * 0.05)                        // соц. отчисления
+  const sn = Math.max(0, Math.round((okl - opv - vosms) * 0.06) - so) // соцналог за вычетом СО
+  const employerCost = okl + opvr + oosms + so + sn                // полная стоимость для работодателя
+  return { opv, vosms, ipn, net, opvr, oosms, so, sn, employerCost }
+}
+
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
@@ -183,10 +201,10 @@ export default function OfficeScreen() {
 
   // P&L (упрощённо): выручка без НДС − себестоимость проданного − ФОТ (оклады + СО 3.5%)
   const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l.dishId, l.qty), 0), 0).toFixed(2)
-  const payrollBase = staffList.reduce((s, p) => s + (salary[p.id] ?? 250000), 0)
-  const payrollSO = Math.round(payrollBase * 0.035)
+  const payrollBase = staffList.reduce((s, p) => s + (salary[p.id] ?? 250000), 0) // оклады (gross)
+  const payrollEmployer = staffList.reduce((s, p) => s + kzTax(salary[p.id] ?? 250000).employerCost, 0) // полная стоимость ФОТ с взносами РК
   const grossProfit = +(noVat(revenue) - cogs).toFixed(2)
-  const opProfit = +(grossProfit - payrollBase - payrollSO).toFixed(2)
+  const opProfit = +(grossProfit - payrollEmployer).toFixed(2)
 
   // премия по мотивационным программам — за личные продажи сотрудника (waiter) в закрытых заказах
   const motivationOf = (staffName: string) => {
@@ -210,17 +228,14 @@ export default function OfficeScreen() {
   // ───────── зарплата: начислено (оклад − налоги + премия − удержания) + выплаты (аванс/расчёт) ─────────
   const payrollOf = (staffId: string, staffName: string) => {
     const okl = salary[staffId] ?? 250000
-    const opv = Math.round(okl * 0.10), vosms = Math.round(okl * 0.02)
-    const ipn = Math.round((okl - opv - vosms) * 0.10)
-    const base = okl - opv - vosms - ipn // оклад за вычетом налогов
-    const so = Math.round(okl * 0.035)
+    const t = kzTax(okl) // 🇰🇿 налоги РК 2026
     const premium = motivationOf(staffName)
     const deduction = salaryDeductions.filter((d) => d.staffId === staffId).reduce((s, d) => s + d.amount, 0)
-    const net = +(base + premium - deduction).toFixed(2) // итого начислено к выплате
+    const net = +(t.net + premium - deduction).toFixed(2) // итого к выплате на руки
     const advance = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'advance').reduce((s, p) => s + p.amount, 0)
     const settle = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'settlement').reduce((s, p) => s + p.amount, 0)
     const remaining = +(net - advance - settle).toFixed(2)
-    return { okl, opv, vosms, ipn, base, premium, deduction, net, so, advance, settle, remaining }
+    return { okl, ...t, premium, deduction, net, advance, settle, remaining }
   }
   // сводка по зарплате (для шапки раздела)
   const payrollRows = staffList.map((p) => ({ p, ...payrollOf(p.id, p.name) }))
@@ -885,7 +900,7 @@ export default function OfficeScreen() {
                     ['Себестоимость проданного', -cogs, false],
                     ['Валовая прибыль', grossProfit, true],
                     ['ФОТ (оклады)', -payrollBase, false],
-                    ['Соц. налог (СО 3.5%)', -payrollSO, false],
+                    ['Взносы работодателя (ОПВР 3,5% / ООСМС 3% / СО 5% / СН 6%)', -(payrollEmployer - payrollBase), false],
                     ['Операционная прибыль', opProfit, true],
                   ].map(([label, val, bold]) => (
                     <div key={label as string} className={`flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0 ${bold ? 'font-semibold bg-gray-50' : ''}`}>
@@ -1005,8 +1020,8 @@ export default function OfficeScreen() {
         ) : (
           <div className="p-6 max-w-5xl">
             <div className="text-xs text-gray-500 mb-4">
-              Платёжная ведомость (как в iikoOffice): метод начисления — оклад минус налоги РК (ОПВ 10%, ВОСМС 2%, ИПН 10%, СО 3.5% работодатель) = <b>к выплате</b>, затем выдаётся <b>аванс</b> (середина месяца) и <b>расчёт</b> (остаток).
-              Выдача = <b>изъятие наличных из кассы</b> (тип «зарплата» → попадает в смену и отчёт 038).
+              Платёжная ведомость (iikoOffice). 🇰🇿 Налоги РК 2026: удержания с работника — ОПВ 10%, ВОСМС 2%, ИПН 10% (вычет ОПВ+ВОСМС+30 МРП); за счёт работодателя — ОПВР 3,5%, ООСМС 3%, СО 5%, соцналог 6%.
+              «К выплате» = оклад − удержания + премия − штрафы; выдача аванса/расчёта = <b>изъятие наличных из кассы</b> (отчёт 038).
             </div>
 
             {/* сводка: начислено / премия / выдано авансов / расчёта / осталось */}
@@ -1025,13 +1040,13 @@ export default function OfficeScreen() {
                   <th className="text-right">Аванс</th><th className="text-right">Расчёт</th><th className="text-right">Остаток</th><th className="p-2 text-center">Действия</th>
                 </tr></thead>
                 <tbody>
-                  {payrollRows.map(({ p, okl, opv, vosms, ipn, premium, deduction, net, advance, settle, remaining }) => {
+                  {payrollRows.map(({ p, okl, opv, vosms, ipn, opvr, oosms, so, sn, premium, deduction, net, advance, settle, remaining }) => {
                     const advanceAmt = Math.min(remaining, Math.round(net * 0.4)) // аванс ≈ 40% от начисленного
                     return (
                       <tr key={p.id} className="border-b border-gray-100 last:border-0">
                         <td className="p-2">{p.name}<div className="text-xs text-gray-400">{p.positions[0]}</div></td>
                         <td className="text-right"><input type="number" value={okl} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" /></td>
-                        <td className="text-right text-gray-500" title={`ОПВ ${opv} · ВОСМС ${vosms} · ИПН ${ipn}`}>{formatTenge(opv + vosms + ipn)}</td>
+                        <td className="text-right text-gray-500" title={`Удержано: ОПВ ${opv} · ВОСМС ${vosms} · ИПН ${ipn}\nРаботодатель: ОПВР ${opvr} · ООСМС ${oosms} · СО ${so} · СН ${sn}`}>{formatTenge(opv + vosms + ipn)}</td>
                         <td className="text-right text-emerald-600">{premium > 0 ? '+' + formatTenge(premium) : <span className="text-gray-300">—</span>}</td>
                         <td className="text-right text-red-500">{deduction > 0 ? '−' + formatTenge(deduction) : <span className="text-gray-300">—</span>}</td>
                         <td className="text-right font-semibold">{formatTenge(net)}</td>
