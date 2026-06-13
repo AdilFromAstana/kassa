@@ -8,7 +8,7 @@ import type { Staff } from '../types'
 // Стартовый экран: вход по 4-значному PIN → открытие личной смены (выбор должности).
 export default function LoginScreen() {
   const navigate = useNavigate()
-  const { login, openPersonalShift } = usePos()
+  const { login, openPersonalShift, staffList } = usePos()
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [authed, setAuthed] = useState<Staff | null>(null)
@@ -45,7 +45,9 @@ export default function LoginScreen() {
           <div className="h-5 text-pos-rose text-sm">{error}</div>
           <NumPad onKey={onKey} onBackspace={() => setPin(pin.slice(0, -1))} onClear={() => setPin('')} />
           <div className="text-xs text-gray-400 text-center max-w-xs">
-            PIN-коды (мок): Петров <b>1111</b>, Иванова <b>2222</b>, Легасов <b>3333</b>, Админ <b>0000</b>
+            PIN-коды (мок): {staffList.map((s, i) => (
+              <span key={s.id}>{i > 0 ? ', ' : ''}{s.name.split(' ')[0]} <b>{s.pin}</b></span>
+            ))}
           </div>
           <button onClick={() => navigate('/office')} className="text-xs text-gray-500 hover:text-pos-accent underline underline-offset-2">
             Бэк-офис (iikoOffice, мок) →

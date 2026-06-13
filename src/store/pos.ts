@@ -2,10 +2,10 @@ import { create } from 'zustand'
 import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
-  Ingredient, WriteOff,
+  Ingredient, WriteOff, PriceOrder, PriceOrderLine,
 } from '../types'
 import { findDish } from '../mock/menu'
-import { findStaffByPin, initialBanquets, messages as messagesSeed, contractors as contractorsSeed } from '../mock/data'
+import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -64,6 +64,24 @@ function loadContractors(): Contractor[] {
 function loadInvoices(): Invoice[] {
   try { const raw = localStorage.getItem('iiko-invoices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return []
+}
+
+// Сотрудники: справочник из офиса (карточки), seed из data.ts, поверх — сохранённые в localStorage.
+function loadStaff(): Staff[] {
+  try { const raw = localStorage.getItem('iiko-staff'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return staffSeed.map((s) => ({ ...s }))
+}
+function persistStaff(list: Staff[]) {
+  try { localStorage.setItem('iiko-staff', JSON.stringify(list)) } catch { /* ignore */ }
+}
+
+// Приказы об изменении цен (Прейскурант).
+function loadPriceOrders(): PriceOrder[] {
+  try { const raw = localStorage.getItem('iiko-price-orders'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return []
+}
+function persistPriceOrders(list: PriceOrder[]) {
+  try { localStorage.setItem('iiko-price-orders', JSON.stringify(list)) } catch { /* ignore */ }
 }
 
 // Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
@@ -143,6 +161,8 @@ interface PosState {
   contractors: Contractor[] // поставщики (KZ, БИН/ИИН)
   invoices: Invoice[] // приходные накладные / входящие ЭСФ
   invSeq: number
+  priceOrders: PriceOrder[] // приказы об изменении цен (Прейскурант)
+  priceOrderSeq: number
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -153,7 +173,7 @@ interface PosState {
   logout: () => void
   openPersonalShift: (position: string) => void
   closePersonalShift: () => void
-  openCashShift: () => void
+  openCashShift: (openingCash?: number) => void
   closeCashShift: () => void
 
   // orders
@@ -181,7 +201,9 @@ interface PosState {
   changePaymentType: (receiptNo: string, payments: PaymentSplit[]) => void
   moveOrderToTable: (orderId: number, tableId: string, hallId: string) => void
   mergeOrderInto: (sourceId: number, targetId: number) => void
+  forceCloseOrder: (orderId: number) => void // принудительное закрытие незакрытого заказа из мастера смены
   addBanquet: (b: Omit<Banquet, 'id' | 'status'>) => void
+  updateBanquet: (id: number, patch: Partial<Banquet>) => void
   setBanquetStatus: (id: number, status: BanquetStatus) => void
   addStop: (dishId: string, remaining?: number) => void
   removeStop: (dishId: string) => void
@@ -193,11 +215,20 @@ interface PosState {
   addContractor: (name: string, bin: string) => void
   addPurchase: (supplierId: string, lines: InvoiceLine[]) => Invoice | null // приходная + ЭСФ + приход на склад
   addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
-  createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
+  createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string; toStore?: string; result?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
   setDishPrice: (dishId: string, price: number) => void  // правка цены в офисе
   setTechCard: (dishId: string, items: TechCardItem[]) => void // правка техкарты в офисе
+
+  // сотрудники (карточки из офиса → вход на кассе)
+  addStaff: (s: Omit<Staff, 'id'>) => void
+  updateStaff: (id: string, patch: Partial<Omit<Staff, 'id'>>) => void
+  removeStaff: (id: string) => void
+
+  // прейскурант (приказы об изменении цен → активация уезжает на кассу)
+  createPriceOrder: (lines: PriceOrderLine[], date: string, note: string) => PriceOrder | null
+  activatePriceOrder: (id: number) => void
 
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
@@ -211,7 +242,7 @@ interface PosState {
 }
 
 export const usePos = create<PosState>((set, get) => ({
-  staffList: [],
+  staffList: loadStaff(),
   user: null,
   personalShift: null,
   cashShift: DEMO_INIT ? { no: 108, openedAt: fullNow(), openedBy: 'Петров К.С.' } : null,
@@ -238,13 +269,15 @@ export const usePos = create<PosState>((set, get) => ({
   contractors: loadContractors(),
   invoices: loadInvoices(),
   invSeq: loadInvoices().length,
+  priceOrders: loadPriceOrders(),
+  priceOrderSeq: loadPriceOrders().length,
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
   banquetSeq: initialBanquets.length,
 
   login: (pin) => {
-    const s = findStaffByPin(pin) ?? null
+    const s = get().staffList.find((x) => x.pin === pin) ?? null
     if (s) set({ user: s })
     return s
   },
@@ -257,9 +290,16 @@ export const usePos = create<PosState>((set, get) => ({
   },
   closePersonalShift: () => set({ personalShift: null, currentOrderId: null }),
 
-  openCashShift: () => {
+  openCashShift: (openingCash = 0) => {
     const u = get().user
-    set((st) => ({ cashShift: { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: u?.name ?? '' } }))
+    set((st) => ({
+      cashShift: { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: u?.name ?? '', openingCash },
+      // начальный остаток (разменный фонд) — внесение наличных в ящик на старте смены
+      cashMovements: openingCash > 0
+        ? [{ id: st.movementSeq + 1, kind: 'in' as const, type: 'Начальный остаток (разменный фонд)', amount: openingCash, comment: 'Открытие смены', at: fullNow() }, ...st.cashMovements]
+        : st.cashMovements,
+      movementSeq: openingCash > 0 ? st.movementSeq + 1 : st.movementSeq,
+    }))
   },
   closeCashShift: () =>
     set((st) => {
@@ -495,11 +535,22 @@ export const usePos = create<PosState>((set, get) => ({
       }
     }),
 
+  // Принудительное закрытие незакрытого заказа из мастера закрытия смены.
+  // В моке заказ просто снимается (отменяется) — в смену не переносится.
+  forceCloseOrder: (orderId) =>
+    set((st) => ({
+      orders: st.orders.filter((o) => o.id !== orderId),
+      currentOrderId: st.currentOrderId === orderId ? null : st.currentOrderId,
+    })),
+
   addBanquet: (b) =>
     set((st) => ({
       banquets: [{ ...b, id: st.banquetSeq + 1, status: 'Действует' }, ...st.banquets],
       banquetSeq: st.banquetSeq + 1,
     })),
+
+  updateBanquet: (id, patch) =>
+    set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, ...patch } : b)) })),
 
   setBanquetStatus: (id, status) =>
     set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, status } : b)) })),
@@ -573,7 +624,7 @@ export const usePos = create<PosState>((set, get) => ({
   createStoreDoc: (type, lines, opts) => {
     const doc: StoreDoc = {
       id: get().docSeq + 1, type, at: fullNow(), by: get().user?.name ?? '—',
-      store: opts?.store ?? 'Основной', reason: opts?.reason, lines,
+      store: opts?.store ?? 'Основной', toStore: opts?.toStore, result: opts?.result, reason: opts?.reason, lines,
     }
     set((st) => {
       const ingredients = st.ingredients.map((i) => {
@@ -603,6 +654,49 @@ export const usePos = create<PosState>((set, get) => ({
     const next = { ...st.techCardOverrides, [dishId]: items }
     try { localStorage.setItem('iiko-techcards', JSON.stringify(next)) } catch { /* ignore */ }
     return { techCardOverrides: next }
+  }),
+
+  // сотрудники: карточки правятся в офисе, вход на кассе (login) идёт по этому списку
+  addStaff: (s) => set((st) => {
+    const id = 's-' + (s.name.toLowerCase().replace(/\s+/g, '-') || 'new') + '-' + (st.staffList.length + 1)
+    const list = [...st.staffList, { ...s, id }]
+    persistStaff(list)
+    return { staffList: list }
+  }),
+  updateStaff: (id, patch) => set((st) => {
+    const list = st.staffList.map((x) => (x.id === id ? { ...x, ...patch } : x))
+    persistStaff(list)
+    // если правят текущего пользователя — синхронизируем
+    const user = st.user?.id === id ? { ...st.user, ...patch } : st.user
+    return { staffList: list, user }
+  }),
+  removeStaff: (id) => set((st) => {
+    const list = st.staffList.filter((x) => x.id !== id)
+    persistStaff(list)
+    return { staffList: list }
+  }),
+
+  // прейскурант: приказ создаётся черновиком; активация записывает новые цены в priceOverrides (касса читает priceOf)
+  createPriceOrder: (lines, date, note) => {
+    if (lines.length === 0) return null
+    const n = get().priceOrderSeq + 1
+    const order: PriceOrder = { id: n, no: `ПР-${1000 + n}`, date, note, status: 'draft', lines, createdAt: fullNow() }
+    set((st) => {
+      const list = [order, ...st.priceOrders]
+      persistPriceOrders(list)
+      return { priceOrders: list, priceOrderSeq: n }
+    })
+    return order
+  },
+  activatePriceOrder: (id) => set((st) => {
+    const order = st.priceOrders.find((o) => o.id === id)
+    if (!order) return {}
+    const prices = { ...st.priceOverrides }
+    for (const l of order.lines) prices[l.dishId] = l.newPrice
+    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(prices)) } catch { /* ignore */ }
+    const list = st.priceOrders.map((o) => (o.id === id ? { ...o, status: 'active' as const } : o))
+    persistPriceOrders(list)
+    return { priceOverrides: prices, priceOrders: list }
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {

@@ -4,6 +4,7 @@ import { Lock, ListOrdered, Receipt, Puzzle, Wrench, Power, TriangleAlert } from
 import { usePos } from '../store/pos'
 import { printToast } from '../lib/print'
 import CashMovementModal from '../components/CashMovementModal'
+import OpenShiftModal from '../components/OpenShiftModal'
 
 // Экран доп. меню iikoFront (1-в-1 со скрином): блоки Денис/ГОСТИ/ПЕРСОНАЛ/СЕРВИС/КАССА.
 type Cell = { label: string; onClick?: () => void; disabled?: boolean; accent?: boolean }
@@ -15,6 +16,7 @@ export default function MainMenuScreen() {
   const est = pos.establishment
   const isRest = est.mode === 'restaurant'
   const [cashModal, setCashModal] = useState<'in' | 'out' | null>(null)
+  const [openShift, setOpenShift] = useState(false)
 
   // нет кассира — на вход (иначе вверху «undefined»)
   useEffect(() => { if (!user) navigate('/') }, [user, navigate])
@@ -118,7 +120,7 @@ export default function MainMenuScreen() {
                   { label: 'Возврат товаров', onClick: () => navigate('/orders/closed'), disabled: !pos.can('F_STRN') },
                 ]
               : [ // смена ЗАКРЫТА — доступно только открытие + неоперационные
-                  { label: 'Открыть кассовую смену', onClick: openCashShift, accent: true, disabled: !pos.can('F_OCS') },
+                  { label: 'Открыть кассовую смену', onClick: () => setOpenShift(true), accent: true, disabled: !pos.can('F_OCS') },
                   { label: 'Заказы закрытых кассовых смен', onClick: () => navigate('/shifts/closed') },
                   { label: 'Сменить кассира', onClick: switchCashier },
                 ]
@@ -142,6 +144,12 @@ export default function MainMenuScreen() {
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-pos-accent text-sm flex items-center gap-2"><TriangleAlert size={16} /> Кассовая смена не открыта — откройте её, чтобы принимать заказы</div>
       )}
       {cashModal && <CashMovementModal kind={cashModal} onClose={() => setCashModal(null)} />}
+      {openShift && (
+        <OpenShiftModal
+          onConfirm={(opening) => { openCashShift(opening); setOpenShift(false); printToast(`Кассовая смена открыта · разменный фонд ${opening.toLocaleString('ru-RU')} ₸`) }}
+          onCancel={() => setOpenShift(false)}
+        />
+      )}
     </div>
   )
 }

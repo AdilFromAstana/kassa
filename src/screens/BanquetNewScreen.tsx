@@ -3,52 +3,73 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Menu, Lock, ChevronLeft, Keyboard, ClipboardList } from 'lucide-react'
 import { usePos } from '../store/pos'
 import { halls, tablesByHall } from '../mock/data'
+import { todayISO, formatRu, fromISO, toISO } from '../lib/date'
+import { formatTenge } from '../lib/money'
 import type { BanquetType } from '../types'
 import TimePickerModal from '../components/TimePickerModal'
 import PhonePadModal from '../components/PhonePadModal'
 import TextInputModal from '../components/TextInputModal'
 import TableSelectModal from '../components/TableSelectModal'
 import GuestCountModal from '../components/GuestCountModal'
+import CalendarModal from '../components/CalendarModal'
 
-// Карточка создания резерва/банкета (FRONT_03 §4.4) — 1:1 с iikoFront: колонки КЛИЕНТ / РЕЗЕРВ.
+const PREPAY_METHODS = ['Без предоплаты', 'Наличные', 'Банковские карты']
+const DURATIONS = [60, 90, 120, 150, 180, 240] // мин
+const fmtDur = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+
+// Карточка создания/редактирования резерва/банкета (FRONT_03 §4.4) — колонки КЛИЕНТ / РЕЗЕРВ.
 export default function BanquetNewScreen() {
   const navigate = useNavigate()
   const [sp] = useSearchParams()
-  const { addBanquet, banquets, logout } = usePos()
-  const type: BanquetType = (sp.get('type') as BanquetType) || 'Резерв'
+  const { addBanquet, updateBanquet, banquets, logout } = usePos()
+  const editId = sp.get('id') ? Number(sp.get('id')) : null
+  const existing = editId != null ? banquets.find((b) => b.id === editId) : undefined
+  const type: BanquetType = existing?.type ?? ((sp.get('type') as BanquetType) || 'Резерв')
 
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [phone, setPhone] = useState('+7 ')
+  // разбор имени из существующего клиента (Имя + Фамилия)
+  const [exFirst, ...exRest] = (existing?.clientName ?? '').split(' ')
+  const [firstName, setFirstName] = useState(exFirst ?? '')
+  const [lastName, setLastName] = useState(exRest.join(' '))
+  const [phone, setPhone] = useState(existing?.clientPhone ?? '+7 ')
   const [card, setCard] = useState('')
   const [other, setOther] = useState('')
   const [extra, setExtra] = useState('')
-  const [hallId, setHallId] = useState('')
-  const [tableId, setTableId] = useState('')
+  const [hallId, setHallId] = useState(existing?.hallId ?? '')
+  const [tableId, setTableId] = useState(existing?.tableId ?? '')
   const [tableOpen, setTableOpen] = useState(false)
   const [guestsOpen, setGuestsOpen] = useState(false)
-  const [time, setTime] = useState('19:00')
-  const [guests, setGuests] = useState('2')
-  const [comment, setComment] = useState('')
+  const [date, setDate] = useState(existing?.date ?? todayISO())
+  const [dateOpen, setDateOpen] = useState(false)
+  const [time, setTime] = useState(existing?.time ?? '19:00')
+  const [guests, setGuests] = useState(String(existing?.guests ?? 2))
+  const [comment, setComment] = useState(existing?.comment ?? '')
+  const [duration, setDuration] = useState(existing?.durationMin ?? 120)
+  const [prepay, setPrepay] = useState(existing?.prepayment ? String(existing.prepayment) : '')
+  const [prepayMethod, setPrepayMethod] = useState(existing?.prepaymentMethod ?? PREPAY_METHODS[0])
   const [remind, setRemind] = useState(true)
   const [timeOpen, setTimeOpen] = useState(false)
   const [phoneOpen, setPhoneOpen] = useState(false)
   // активное текстовое поле под сенсорную клавиатуру
   const [edit, setEdit] = useState<{ title: React.ReactNode; value: string; set: (v: string) => void } | null>(null)
 
-  const no = banquets.length + 1
+  const no = existing?.id ?? banquets.length + 1
   const hallName = (id: string) => halls.find((h) => h.id === id)?.name ?? ''
   const tableNo = (id: string) => tablesByHall(hallId).find((t) => t.id === id)?.no ?? ''
   const save = () => {
     if (!firstName || !time) { alert('Заполните имя и время'); return }
     const fHall = hallId || halls[0].id
     const fTable = tableId || tablesByHall(fHall)[0].id
-    addBanquet({
-      type, hallId: fHall, tableId: fTable, date: 'Сегодня', time,
+    const payload = {
+      type, hallId: fHall, tableId: fTable, date, time,
       guests: parseInt(guests, 10) || 1,
       clientName: [firstName, lastName].filter(Boolean).join(' '),
-      clientPhone: phone, comment, prepayment: 0,
-    })
+      clientPhone: phone, comment,
+      prepayment: parseFloat(prepay) || 0,
+      prepaymentMethod: (parseFloat(prepay) || 0) > 0 ? prepayMethod : undefined,
+      durationMin: duration,
+    }
+    if (existing) updateBanquet(existing.id, payload)
+    else addBanquet(payload)
     navigate('/banquets')
   }
 
@@ -78,10 +99,10 @@ export default function BanquetNewScreen() {
       {/* шапка: № + время | статус | меню/замок */}
       <div className="h-16 bg-white text-gray-800 flex items-center px-4 shrink-0">
         <div>
-          <div className="text-lg font-semibold">{type} № {no}</div>
-          <div className="text-sm text-gray-500">{time} (Сегодня)</div>
+          <div className="text-lg font-semibold">{existing ? `${type} № ${no} (редактирование)` : `${type} № ${no}`}</div>
+          <div className="text-sm text-gray-500">{time} · {formatRu(date)}</div>
         </div>
-        <div className="mx-auto text-lg text-gray-800">Статус: <b>Новый</b></div>
+        <div className="mx-auto text-lg text-gray-800">Статус: <b>{existing?.status ?? 'Новый'}</b></div>
         <div className="flex items-center gap-4 text-gray-700">
           <button onClick={() => navigate('/menu')}><Menu size={22} /></button>
           <button onClick={() => { logout(); navigate('/') }}><Lock size={18} /></button>
@@ -115,10 +136,30 @@ export default function BanquetNewScreen() {
         <div className="w-[440px]">
           <div className="text-center text-white/70 tracking-widest mb-2">{type === 'Банкет' ? 'БАНКЕТ' : 'РЕЗЕРВ'}</div>
           <div className="grid grid-cols-2">
-            <Info label="Дата:">10 июня 2026 г.</Info>
+            <Info label="Дата:"><button onClick={() => setDateOpen(true)} className="w-full text-center text-gray-800 underline underline-offset-2 decoration-dotted">{formatRu(date)}</button></Info>
             <Info label="Время:"><button onClick={() => setTimeOpen(true)} className="w-full text-center text-gray-800 underline underline-offset-2 decoration-dotted">{time}</button></Info>
-            <Info label="Длительность:">02:00</Info>
+            <Info label="Длительность:">
+              <select value={duration} onChange={(e) => setDuration(Number(e.target.value))} className="w-full text-center text-gray-800 bg-transparent outline-none">
+                {DURATIONS.map((m) => <option key={m} value={m}>{fmtDur(m)}</option>)}
+              </select>
+            </Info>
             <Info label="Гостей:"><button onClick={() => setGuestsOpen(true)} className="w-full text-center text-gray-800">{guests}</button></Info>
+          </div>
+
+          {/* Предоплата: сумма + способ оплаты */}
+          <div className="flex border border-gray-300 -mt-px">
+            <div className="w-32 px-3 flex items-center justify-end text-right text-gray-600 bg-gray-100">Предоплата</div>
+            <button onClick={() => setEdit({ title: 'Сумма предоплаты, ₸', value: prepay, set: (v) => setPrepay(v.replace(/[^\d]/g, '')) })}
+              className={`flex-1 bg-white text-left px-3 h-14 ${prepay ? 'text-gray-800' : 'text-gray-400'}`}>
+              {prepay ? formatTenge(parseFloat(prepay)) : 'не внесена'}
+            </button>
+          </div>
+          <div className="flex border border-gray-300 -mt-px">
+            <div className="w-32 px-3 flex items-center justify-end text-right text-gray-600 bg-gray-100">Способ<br />предоплаты</div>
+            <select value={prepayMethod} onChange={(e) => setPrepayMethod(e.target.value)} disabled={!(parseFloat(prepay) > 0)}
+              className="flex-1 bg-white px-3 h-14 text-gray-800 outline-none disabled:text-gray-400">
+              {PREPAY_METHODS.map((m) => <option key={m}>{m}</option>)}
+            </select>
           </div>
           <div className="flex border border-gray-300 -mt-px">
             <div className="w-32 px-3 flex items-center justify-end text-right text-gray-600 bg-[#ece0e0]">Залы<br />Столы</div>
@@ -187,6 +228,13 @@ export default function BanquetNewScreen() {
           value={parseInt(guests, 10) || undefined}
           onOk={(n) => { setGuests(String(n)); setGuestsOpen(false) }}
           onCancel={() => setGuestsOpen(false)}
+        />
+      )}
+      {dateOpen && (
+        <CalendarModal
+          value={fromISO(date)}
+          onOk={(d) => { setDate(toISO(d)); setDateOpen(false) }}
+          onCancel={() => setDateOpen(false)}
         />
       )}
     </div>

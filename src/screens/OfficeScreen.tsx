@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, Monitor } from 'lucide-react'
+import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes } from '../mock/menu'
 import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
-import { staff } from '../mock/data'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
-import type { Establishment } from '../types'
+import { todayISO, formatRu, fromISO, toISO } from '../lib/date'
+import CalendarModal from '../components/CalendarModal'
+import type { Establishment, PriceOrderLine } from '../types'
 
 // iikoOffice (мок бэк-офиса) — здесь редактируется конфиг заведения и меню/цены, которые «уезжают»
 // на кассу (Front). Общий стор + localStorage: изменения применяются на кассе сразу.
@@ -26,22 +27,27 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
+type Section = 'settings' | 'menu' | 'prikazy' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
+  { id: 'prikazy', label: 'Прейскурант (приказы)' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
   { id: 'payroll', label: 'Зарплата (KZ)' },
   { id: 'reports', label: 'Отчёты' },
 ]
+const SECTION_TITLE: Record<Section, string> = {
+  settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
+  staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
+}
 
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
-  'Управляющий': ['settings', 'menu', 'stock', 'accounting', 'payroll', 'reports'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'stock', 'accounting', 'payroll', 'reports'],
   'Бухгалтер': ['accounting', 'payroll', 'reports', 'stock'],
 }
 
@@ -49,7 +55,8 @@ export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
-    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf } = usePos()
+    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
+    staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
@@ -63,6 +70,31 @@ export default function OfficeScreen() {
   const [pLines, setPLines] = useState<{ ingredientId: string; name: string; qty: number; price: number }[]>([])
   const [pIng, setPIng] = useState(ingredients[0]?.id ?? ''); const [pQty, setPQty] = useState(''); const [pPrice, setPPrice] = useState('')
   const [outBuyer, setOutBuyer] = useState(''); const [outAmount, setOutAmount] = useState('')
+  // карточка сотрудника (раздел staff)
+  const [editStaff, setEditStaff] = useState<{ id: string | null; name: string; pin: string; positions: string[] } | null>(null)
+  // приказы цен (раздел prikazy)
+  const [poLines, setPoLines] = useState<PriceOrderLine[]>([])
+  const [poDish, setPoDish] = useState(dishes[0]?.id ?? '')
+  const [poPrice, setPoPrice] = useState('')
+  const [poDate, setPoDate] = useState(todayISO())
+  const [poNote, setPoNote] = useState('')
+  const [poCal, setPoCal] = useState(false)
+  const addPoLine = () => {
+    const d = dishes.find((x) => x.id === poDish); const np = parseFloat(poPrice.replace(',', '.'))
+    if (!d || !(np >= 0)) return
+    setPoLines((ls) => [...ls.filter((l) => l.dishId !== d.id), { dishId: d.id, name: d.name, oldPrice: priceOf(d.id, d.price), newPrice: np }])
+    setPoPrice('')
+  }
+  const submitPriceOrder = () => {
+    const o = createPriceOrder(poLines, poDate, poNote.trim() || 'Изменение цен')
+    if (o) { printToast(`Приказ ${o.no} создан (черновик)`); setPoLines([]); setPoNote('') }
+  }
+  // отчёты (раздел reports)
+  const [report, setReport] = useState<'sales' | 'stock' | 'olap' | 'pnl'>('sales')
+  const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
+  const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
+  const [olapDim, setOlapDim] = useState<'day' | 'dish' | 'waiter' | 'payment'>('dish')
+  const [olapMeasure, setOlapMeasure] = useState<'revenue' | 'checks' | 'qty'>('revenue')
   const addPLine = () => {
     const ing = ingredients.find((i) => i.id === pIng); const q = parseFloat(pQty.replace(',', '.')); const pr = parseFloat(pPrice.replace(',', '.'))
     if (!ing || !(q > 0) || !(pr > 0)) return
@@ -86,11 +118,57 @@ export default function OfficeScreen() {
   }
   const avg = closedOrders.length ? revenue / closedOrders.length : 0
   const refSum = refunds.reduce((s, r) => s + r.amount, 0)
-  const byType: Record<string, number> = {}
-  for (const o of closedOrders) for (const p of o.payments) byType[p.name] = (byType[p.name] ?? 0) + p.amount
-  const dishAgg: Record<string, { qty: number; sum: number }> = {}
-  for (const o of closedOrders) for (const l of o.lines) { (dishAgg[l.name] ??= { qty: 0, sum: 0 }); dishAgg[l.name].qty += l.qty; dishAgg[l.name].sum += lineTotal(l) }
-  const topDishes = Object.entries(dishAgg).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.sum - a.sum).slice(0, 5)
+
+  // ───────── данные для отчётов (раздел reports) ─────────
+  const noVat = (x: number) => +(x / 1.16).toFixed(2)
+  const dayKey = (s: string) => s.split(',')[0] ?? s // fullNow() = "dd.mm.yyyy, hh:mm"
+  const lineCost = (dishId: string, qty: number) => dishCost(dishId, ingredients, techCardOverrides) * qty
+
+  // продажи по блюдам: выручка / себест. / валовая прибыль / наценка
+  const salesByDish = Object.values(closedOrders.reduce((acc, o) => {
+    for (const l of o.lines) {
+      const a = (acc[l.dishId] ??= { name: l.name, qty: 0, rev: 0, cost: 0 })
+      a.qty += l.qty; a.rev += lineTotal(l); a.cost += lineCost(l.dishId, l.qty)
+    }
+    return acc
+  }, {} as Record<string, { name: string; qty: number; rev: number; cost: number }>)).sort((a, b) => b.rev - a.rev)
+
+  // продажи по дням
+  const salesByDay = Object.values(closedOrders.reduce((acc, o) => {
+    const k = dayKey(o.paidAt)
+    const a = (acc[k] ??= { day: k, checks: 0, rev: 0 })
+    a.checks++; a.rev += o.total
+    return acc
+  }, {} as Record<string, { day: string; checks: number; rev: number }>))
+
+  // остатки на складах + критерий
+  const stockRows = ingredients.filter((i) =>
+    stockCrit === 'belowMin' ? i.stock < i.min : stockCrit === 'zero' ? i.stock === 0 : stockCrit === 'neg' ? i.stock < 0 : true)
+  const stockValue = ingredients.reduce((s, i) => s + i.stock * i.costPerUnit, 0)
+
+  // OLAP-лайт: измерение × показатель
+  const olapRows = (() => {
+    const acc: Record<string, number> = {}
+    const bump = (k: string, v: number) => { acc[k] = (acc[k] ?? 0) + v }
+    for (const o of closedOrders) {
+      if (olapDim === 'dish') for (const l of o.lines) bump(l.name, olapMeasure === 'revenue' ? lineTotal(l) : olapMeasure === 'checks' ? 1 : l.qty)
+      else if (olapDim === 'payment') for (const p of o.payments) bump(p.name, olapMeasure === 'revenue' ? p.amount : olapMeasure === 'checks' ? 1 : 0)
+      else {
+        const k = olapDim === 'day' ? dayKey(o.paidAt) : (o.waiter || '—')
+        bump(k, olapMeasure === 'revenue' ? o.total : olapMeasure === 'checks' ? 1 : o.lines.reduce((s, l) => s + l.qty, 0))
+      }
+    }
+    return Object.entries(acc).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v)
+  })()
+  const olapMax = Math.max(1, ...olapRows.map((r) => r.v))
+  const olapFmt = (v: number) => (olapMeasure === 'revenue' ? formatTenge(v) : String(+v.toFixed(olapMeasure === 'qty' ? 2 : 0)))
+
+  // P&L (упрощённо): выручка без НДС − себестоимость проданного − ФОТ (оклады + СО 3.5%)
+  const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l.dishId, l.qty), 0), 0).toFixed(2)
+  const payrollBase = staffList.reduce((s, p) => s + (salary[p.id] ?? 250000), 0)
+  const payrollSO = Math.round(payrollBase * 0.035)
+  const grossProfit = +(noVat(revenue) - cogs).toFixed(2)
+  const opProfit = +(grossProfit - payrollBase - payrollSO).toFixed(2)
 
   const Toggle = ({ k, label, note }: { k: keyof Establishment; label: string; note: string }) => (
     <button onClick={() => setEstablishment({ [k]: !est[k] } as Partial<Establishment>)}
@@ -133,7 +211,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : section === 'accounting' ? 'Бухгалтерия (KZ)' : section === 'payroll' ? 'Зарплата (KZ)' : 'Отчёты'}</div>
+          <div className="font-semibold">{SECTION_TITLE[section]}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -208,6 +286,77 @@ export default function OfficeScreen() {
               )
             })}
           </div>
+        ) : section === 'prikazy' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Приказ об изменении цен (как в iikoOffice): набор новых цен + дата вступления в силу. <b>Активация</b> отправляет цены на кассу
+              (раздел «Меню и цены» и цены новых позиций в заказе обновляются сразу).
+            </div>
+
+            {/* конструктор приказа */}
+            <div className="bg-white border border-gray-200 rounded-md p-4 mb-6">
+              <div className="text-gray-500 text-xs uppercase mb-2">Новый приказ</div>
+              <div className="flex flex-wrap items-end gap-2 mb-3">
+                <label className="flex flex-col text-xs text-gray-500">Блюдо
+                  <select value={poDish} onChange={(e) => setPoDish(e.target.value)} className="mt-1 h-9 rounded border border-gray-300 px-2 min-w-[220px]">
+                    {dishes.map((d) => <option key={d.id} value={d.id}>{d.name} · тек. {priceOf(d.id, d.price)} ₸</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col text-xs text-gray-500">Новая цена ₸
+                  <input value={poPrice} onChange={(e) => setPoPrice(e.target.value)} inputMode="decimal" placeholder="0" className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right" />
+                </label>
+                <button onClick={addPoLine} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">+ строка</button>
+                <label className="flex flex-col text-xs text-gray-500 ml-auto">Дата вступления
+                  <button onClick={() => setPoCal(true)} className="mt-1 h-9 px-3 rounded border border-gray-300 text-gray-800">{formatRu(poDate)}</button>
+                </label>
+              </div>
+              <input value={poNote} onChange={(e) => setPoNote(e.target.value)} placeholder="Примечание к приказу (необязательно)" className="h-9 w-full rounded border border-gray-300 px-2 mb-3 text-sm" />
+              {poLines.length > 0 && (
+                <div className="border border-gray-100 rounded mb-3">
+                  {poLines.map((l) => (
+                    <div key={l.dishId} className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 last:border-0 text-sm">
+                      <span className="flex-1">{l.name}</span>
+                      <span className="text-gray-400 line-through">{formatTenge(l.oldPrice)}</span>
+                      <span className="w-24 text-right font-medium">{formatTenge(l.newPrice)}</span>
+                      <button onClick={() => setPoLines((ls) => ls.filter((x) => x.dishId !== l.dishId))} className="text-gray-400 hover:text-red-500">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={submitPriceOrder} disabled={poLines.length === 0}
+                className={`h-9 px-4 rounded text-sm ${poLines.length ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Создать приказ (черновик)</button>
+            </div>
+
+            {/* список приказов */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Приказы</div>
+            <div className="space-y-3">
+              {priceOrders.length === 0 ? <div className="text-gray-400 text-sm">Приказов пока нет.</div> : priceOrders.map((o) => (
+                <div key={o.id} className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 h-11 border-b border-gray-100">
+                    <span className="font-medium">{o.no}</span>
+                    <span className="text-sm text-gray-500">с {formatRu(o.date)} · {o.note}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${o.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>{o.status === 'active' ? 'действует' : 'черновик'}</span>
+                    {o.status === 'draft'
+                      ? <button onClick={() => { activatePriceOrder(o.id); printToast(`Приказ ${o.no} активирован — цены на кассе обновлены`) }} className="ml-auto h-8 px-3 rounded bg-blue-600 text-white text-xs">Активировать</button>
+                      : <span className="ml-auto text-emerald-600 text-xs inline-flex items-center gap-1"><Check size={13} />цены на кассе</span>}
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {o.lines.map((l) => (
+                        <tr key={l.dishId} className="border-b border-gray-50 last:border-0">
+                          <td className="px-4 py-1.5">{l.name}</td>
+                          <td className="py-1.5 text-right text-gray-400 line-through">{formatTenge(l.oldPrice)}</td>
+                          <td className="px-4 py-1.5 text-right w-28 font-medium">{formatTenge(l.newPrice)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+
+            {poCal && <CalendarModal value={fromISO(poDate)} onOk={(d) => { setPoDate(toISO(d)); setPoCal(false) }} onCancel={() => setPoCal(false)} />}
+          </div>
         ) : section === 'staff' ? (
           <div className="p-6 max-w-4xl">
             <div className="text-xs text-gray-500 mb-5">
@@ -215,16 +364,58 @@ export default function OfficeScreen() {
               (стоп-лист, возврат, смена, деньги, скидки, отчёты, явки и т.д.).
             </div>
 
-            <div className="text-gray-500 text-xs uppercase mb-2">Сотрудники</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-6">
-              {staff.map((s) => (
+            <div className="flex items-center mb-2">
+              <div className="text-gray-500 text-xs uppercase">Сотрудники (карточки → вход на кассе по PIN)</div>
+              <button onClick={() => setEditStaff({ id: null, name: '', pin: '', positions: [POSITIONS[0]] })}
+                className="ml-auto h-8 px-3 rounded bg-emerald-500 text-white text-xs inline-flex items-center gap-1"><Plus size={14} />Новый сотрудник</button>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-4">
+              {staffList.length === 0 ? <div className="p-3 text-gray-400 text-sm">Сотрудников нет.</div> : staffList.map((s) => (
                 <div key={s.id} className="flex items-center gap-3 px-4 h-12 border-b border-gray-100 last:border-0">
                   <span className="flex-1">{s.name}</span>
                   <span className="text-xs text-gray-400">PIN {s.pin}</span>
                   <span className="text-sm text-gray-600">{s.positions.join(', ')}</span>
+                  <button onClick={() => setEditStaff({ id: s.id, name: s.name, pin: s.pin, positions: [...s.positions] })} className="text-blue-600 text-xs hover:underline">Изменить</button>
+                  <button onClick={() => { if (confirm(`Удалить сотрудника «${s.name}»?`)) removeStaff(s.id) }} className="text-gray-400 hover:text-red-500" title="Удалить"><Trash2 size={15} /></button>
                 </div>
               ))}
             </div>
+
+            {/* карточка создания/редактирования сотрудника */}
+            {editStaff && (
+              <div className="bg-white border border-emerald-300 rounded-md p-4 mb-6">
+                <div className="font-medium mb-3">{editStaff.id ? 'Карточка сотрудника' : 'Новый сотрудник'}</div>
+                <div className="flex flex-wrap gap-3 items-end mb-3">
+                  <label className="flex flex-col text-xs text-gray-500">ФИО
+                    <input value={editStaff.name} onChange={(e) => setEditStaff({ ...editStaff, name: e.target.value })} className="mt-1 h-9 w-64 rounded border border-gray-300 px-2 text-gray-800" placeholder="Фамилия И.О." />
+                  </label>
+                  <label className="flex flex-col text-xs text-gray-500">PIN (4 цифры)
+                    <input value={editStaff.pin} onChange={(e) => setEditStaff({ ...editStaff, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })} inputMode="numeric" className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-gray-800" placeholder="0000" />
+                  </label>
+                </div>
+                <div className="text-xs text-gray-500 mb-1">Должности (право входа + права на кассе)</div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {POSITIONS.map((p) => {
+                    const on = editStaff.positions.includes(p)
+                    return (
+                      <button key={p} onClick={() => setEditStaff({ ...editStaff, positions: on ? editStaff.positions.filter((x) => x !== p) : [...editStaff.positions, p] })}
+                        className={`h-8 px-3 rounded text-sm border ${on ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-gray-600 border-gray-300'}`}>{p}</button>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    const name = editStaff.name.trim()
+                    if (!name || editStaff.pin.length !== 4 || editStaff.positions.length === 0) { alert('Заполните ФИО, 4-значный PIN и хотя бы одну должность'); return }
+                    if (staffList.some((s) => s.pin === editStaff.pin && s.id !== editStaff.id)) { alert('PIN уже занят другим сотрудником'); return }
+                    if (editStaff.id) updateStaff(editStaff.id, { name, pin: editStaff.pin, positions: editStaff.positions })
+                    else addStaff({ name, pin: editStaff.pin, positions: editStaff.positions })
+                    printToast(`Сотрудник «${name}» сохранён`); setEditStaff(null)
+                  }} className="h-9 px-5 rounded bg-emerald-500 text-white text-sm">Сохранить</button>
+                  <button onClick={() => setEditStaff(null)} className="h-9 px-5 rounded bg-gray-200 text-gray-700 text-sm">Отмена</button>
+                </div>
+              </div>
+            )}
 
             <div className="text-gray-500 text-xs uppercase mb-2">Права по должностям</div>
             <div className="bg-white border border-gray-200 rounded-md overflow-auto">
@@ -326,37 +517,161 @@ export default function OfficeScreen() {
             </div>
           </div>
         ) : section === 'reports' ? (
-          <div className="p-6 max-w-3xl">
-            <div className="text-xs text-gray-500 mb-5">
-              Сводка по текущей смене (из закрытых чеков кассы). В реальном iikoOffice — OLAP-отчёты; здесь базовая сводка.
+          <div className="p-6 max-w-5xl">
+            <div className="text-xs text-gray-500 mb-4">
+              Отчёты строятся из закрытых чеков кассы и склада (как OLAP/складские отчёты iikoOffice). Период = текущая открытая смена (мок).
             </div>
-            <div className="grid grid-cols-4 gap-3 mb-6">
+
+            {/* сводка-шапка */}
+            <div className="grid grid-cols-4 gap-3 mb-5">
               <OfficeStat label="Выручка" value={formatTenge(revenue)} />
               <OfficeStat label="Чеков" value={String(closedOrders.length)} />
               <OfficeStat label="Средний чек" value={formatTenge(avg)} />
               <OfficeStat label="Возвраты" value={formatTenge(refSum)} />
             </div>
 
-            <div className="text-gray-500 text-xs uppercase mb-2">По типам оплаты</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-6">
-              {Object.entries(byType).length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет продаж.</div> :
-                Object.entries(byType).map(([n, v]) => (
-                  <div key={n} className="flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0"><span>{n}</span><span>{formatTenge(v)}</span></div>
-                ))}
+            {/* вкладки отчётов */}
+            <div className="flex gap-1 mb-4 border-b border-gray-200">
+              {([['sales', 'Продажи за период'], ['stock', 'Остатки на складах'], ['olap', 'OLAP-отчёт'], ['pnl', 'Прибыли и убытки']] as const).map(([id, label]) => (
+                <button key={id} onClick={() => setReport(id)}
+                  className={`px-4 h-10 text-sm -mb-px border-b-2 ${report === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
+              ))}
+              <button onClick={exportTo1C} className="ml-auto h-8 self-center px-3 rounded bg-slate-700 text-white text-xs">Выгрузить в 1С (JSON)</button>
             </div>
 
-            <div className="text-gray-500 text-xs uppercase mb-2">Топ блюд</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
-              {topDishes.length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет продаж.</div> :
-                topDishes.map((t) => (
-                  <div key={t.name} className="flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0"><span>{t.name} ×{t.qty}</span><span>{formatTenge(t.sum)}</span></div>
-                ))}
-            </div>
+            {/* 1. Продажи за период */}
+            {report === 'sales' && (
+              <div>
+                <div className="flex gap-2 mb-3">
+                  {([['byDish', 'По блюдам'], ['byDay', 'По дням']] as const).map(([m, l]) => (
+                    <button key={m} onClick={() => setSalesMode(m)} className={`h-8 px-3 rounded text-sm ${salesMode === m ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{l}</button>
+                  ))}
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  {salesMode === 'byDish' ? (
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">Блюдо</th><th className="text-right">Кол-во</th><th className="text-right">Выручка</th><th className="text-right">Без НДС</th><th className="text-right">Себест.</th><th className="text-right">Валовая</th><th className="text-right p-2">Наценка %</th>
+                      </tr></thead>
+                      <tbody>
+                        {salesByDish.length === 0 ? <tr><td colSpan={7} className="p-3 text-gray-400">Нет продаж.</td></tr> : salesByDish.map((d) => {
+                          const gross = +(noVat(d.rev) - d.cost).toFixed(2)
+                          const markup = d.cost > 0 ? Math.round(gross / d.cost * 100) : 0
+                          return (
+                            <tr key={d.name} className="border-b border-gray-100 last:border-0">
+                              <td className="p-2">{d.name}</td>
+                              <td className="text-right">{+d.qty.toFixed(2)}</td>
+                              <td className="text-right">{formatTenge(d.rev)}</td>
+                              <td className="text-right text-gray-500">{formatTenge(noVat(d.rev))}</td>
+                              <td className="text-right text-gray-500">{formatTenge(d.cost)}</td>
+                              <td className="text-right font-medium">{formatTenge(gross)}</td>
+                              <td className="text-right p-2 text-gray-600">{d.cost > 0 ? `${markup}%` : '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Дата</th><th className="text-right">Чеков</th><th className="text-right">Выручка</th><th className="text-right p-2">Средний чек</th></tr></thead>
+                      <tbody>
+                        {salesByDay.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Нет продаж.</td></tr> : salesByDay.map((d) => (
+                          <tr key={d.day} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{d.day}</td><td className="text-right">{d.checks}</td><td className="text-right">{formatTenge(d.rev)}</td><td className="text-right p-2">{formatTenge(d.rev / d.checks)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
 
-            <div className="text-gray-400 text-xs mt-4 flex items-center gap-3">
-              <span>Складских документов за сессию: {documents.length}</span>
-              <button onClick={exportTo1C} className="h-8 px-3 rounded bg-slate-700 text-white text-xs">Выгрузить в 1С (JSON)</button>
-            </div>
+            {/* 2. Остатки на складах */}
+            {report === 'stock' && (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  {([['all', 'Все'], ['belowMin', 'Ниже минимума'], ['zero', 'Нулевые'], ['neg', 'Отрицательные']] as const).map(([c, l]) => (
+                    <button key={c} onClick={() => setStockCrit(c)} className={`h-8 px-3 rounded text-sm ${stockCrit === c ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{l}</button>
+                  ))}
+                  <span className="ml-auto text-sm text-gray-500">Стоимость остатков: <b className="text-gray-800">{formatTenge(stockValue)}</b></span>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Артикул</th><th>Товар</th><th>Ед.</th><th className="text-right">Остаток</th><th className="text-right">Мин.</th><th className="text-right">Себест/ед</th><th className="text-right p-2">Сумма</th>
+                    </tr></thead>
+                    <tbody>
+                      {stockRows.length === 0 ? <tr><td colSpan={7} className="p-3 text-gray-400">Нет позиций по критерию.</td></tr> : stockRows.map((i) => {
+                        const cls = i.stock < 0 ? 'text-red-600 font-medium' : i.stock < i.min ? 'text-orange-500 font-medium' : ''
+                        return (
+                          <tr key={i.id} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2 font-mono text-xs text-gray-400">{i.code}</td>
+                            <td>{i.name}</td><td className="text-gray-500">{i.unit}</td>
+                            <td className={`text-right ${cls}`}>{+i.stock.toFixed(3)}</td>
+                            <td className="text-right text-gray-400">{i.min}</td>
+                            <td className="text-right text-gray-500">{formatTenge(i.costPerUnit)}</td>
+                            <td className="text-right p-2">{formatTenge(i.stock * i.costPerUnit)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Красный — отрицательный остаток, оранжевый — ниже минимума (как в iikoOffice).</div>
+              </div>
+            )}
+
+            {/* 3. OLAP-лайт */}
+            {report === 'olap' && (
+              <div>
+                <div className="flex items-center gap-4 mb-4 text-sm">
+                  <label className="flex items-center gap-2">Измерение:
+                    <select value={olapDim} onChange={(e) => setOlapDim(e.target.value as typeof olapDim)} className="h-8 rounded border border-gray-300 px-2">
+                      <option value="dish">Блюдо</option><option value="day">День</option><option value="waiter">Официант</option><option value="payment">Тип оплаты</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2">Показатель:
+                    <select value={olapMeasure} onChange={(e) => setOlapMeasure(e.target.value as typeof olapMeasure)} className="h-8 rounded border border-gray-300 px-2">
+                      <option value="revenue">Выручка</option><option value="checks">Чеки</option><option value="qty">Количество</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                  {olapRows.length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет данных.</div> : olapRows.map((r) => (
+                    <div key={r.k} className="flex items-center gap-3 px-4 h-9 border-b border-gray-100 last:border-0">
+                      <span className="w-44 truncate">{r.k}</span>
+                      <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${Math.round(r.v / olapMax * 100)}%` }} /></div>
+                      <span className="w-28 text-right tabular-nums">{olapFmt(r.v)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 4. P&L */}
+            {report === 'pnl' && (
+              <div className="max-w-xl">
+                <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                  {[
+                    ['Выручка (с ҚҚС)', revenue, false],
+                    ['ҚҚС 16% (в т.ч.)', -vatKz, false],
+                    ['Выручка без НДС', noVat(revenue), true],
+                    ['Себестоимость проданного', -cogs, false],
+                    ['Валовая прибыль', grossProfit, true],
+                    ['ФОТ (оклады)', -payrollBase, false],
+                    ['Соц. налог (СО 3.5%)', -payrollSO, false],
+                    ['Операционная прибыль', opProfit, true],
+                  ].map(([label, val, bold]) => (
+                    <div key={label as string} className={`flex justify-between px-4 h-11 items-center border-b border-gray-100 last:border-0 ${bold ? 'font-semibold bg-gray-50' : ''}`}>
+                      <span>{label as string}</span>
+                      <span className={(val as number) < 0 ? 'text-red-600' : ''}>{formatTenge(val as number)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Упрощённый P&L: себестоимость — по техкартам проданных блюд; ФОТ — из раздела «Зарплата». Полный P&L (с проводками/арендой/прочими расходами) — на .NET.</div>
+              </div>
+            )}
           </div>
         ) : section === 'accounting' ? (
           <div className="p-6 max-w-3xl">
@@ -473,7 +788,7 @@ export default function OfficeScreen() {
                   <th className="p-2">Сотрудник</th><th>Должность</th><th className="text-right">Оклад ₸</th><th className="text-right">ОПВ</th><th className="text-right">ВОСМС</th><th className="text-right">ИПН</th><th className="text-right">На руки</th><th className="text-right p-2">СО (раб-ль)</th>
                 </tr></thead>
                 <tbody>
-                  {staff.map((p) => {
+                  {staffList.map((p) => {
                     const okl = salary[p.id] ?? 250000
                     const opv = Math.round(okl * 0.10), vosms = Math.round(okl * 0.02)
                     const ipn = Math.round((okl - opv - vosms) * 0.10)

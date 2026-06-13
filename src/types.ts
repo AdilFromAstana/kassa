@@ -143,14 +143,22 @@ export type DocType =
   | 'Расходная накладная'
   | 'Инвентаризация'
 
-export interface DocLine { ingredientId: string; name: string; unit: string; qty: number }
+export interface DocLine {
+  ingredientId: string
+  name: string
+  unit: string
+  qty: number
+  booked?: number    // учётный остаток на момент инвентаризации (для расчёта отклонения)
+}
 
 export interface StoreDoc {
   id: number
   type: DocType
   at: string
   by: string         // кто оформил
-  store: string      // склад
+  store: string      // склад (для перемещения — источник)
+  toStore?: string   // склад-получатель (для внутреннего перемещения)
+  result?: string    // блюдо/полуфабрикат-результат (для акта приготовления/переработки)
   reason?: string    // причина (для акта списания)
   lines: DocLine[]
 }
@@ -160,6 +168,24 @@ export interface Staff {
   name: string
   pin: string
   positions: string[]
+}
+
+// Приказ об изменении цен (Прейскурант, iikoOffice). Активация → цены уезжают на кассу.
+export interface PriceOrderLine {
+  dishId: string
+  name: string
+  oldPrice: number
+  newPrice: number
+}
+
+export interface PriceOrder {
+  id: number
+  no: string          // № приказа
+  date: string        // дата вступления в силу (ISO YYYY-MM-DD)
+  note: string
+  status: 'draft' | 'active'
+  lines: PriceOrderLine[]
+  createdAt: string
 }
 
 export interface Contractor {
@@ -213,6 +239,7 @@ export interface CashShift {
   openedAt: string
   openedBy: string
   closedAt?: string
+  openingCash?: number // начальный остаток наличных (разменный фонд) при открытии смены
 }
 
 // Профиль заведения (в реальной айке приходит из офиса: режим терминала + настройки ТП + лицензии).
@@ -280,7 +307,9 @@ export interface Banquet {
   clientName: string
   clientPhone: string
   comment: string
-  prepayment: number // предоплата (для банкета)
+  prepayment: number        // предоплата (для банкета), ₸
+  prepaymentMethod?: string // способ оплаты предоплаты (Наличные / Карта / …)
+  durationMin?: number      // длительность, мин (шаг 30)
 }
 
 export interface PersonalShift {

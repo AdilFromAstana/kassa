@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
 import TopBar from '../components/TopBar'
 import { usePos } from '../store/pos'
+import { warehouses } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
 import type { DocType, DocLine } from '../types'
@@ -20,23 +21,39 @@ export default function DocumentsScreen() {
   const [ingId, setIngId] = useState(ingredients[0]?.id ?? '')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState(REASONS[0])
+  const [store, setStore] = useState(warehouses[0])
+  const [toStore, setToStore] = useState(warehouses[1])
+  const [resultId, setResultId] = useState(ingredients[0]?.id ?? '')
+  const [resultQty, setResultQty] = useState('')
 
-  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]) }
+  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty('') }
   const isInv = type === 'Инвентаризация'
   const isWriteoff = type === 'Акт списания'
+  const isTransfer = type === 'Внутреннее перемещение'
+  const isMake = type === 'Акт приготовления' || type === 'Акт переработки'
+  const isSale = type === 'Расходная накладная'
 
   const addLine = () => {
     const ing = ingredients.find((i) => i.id === ingId)
     const n = parseFloat(qty.replace(',', '.'))
     if (!ing || !(n > 0)) return
-    setLines((ls) => [...ls.filter((l) => l.ingredientId !== ing.id), { ingredientId: ing.id, name: ing.name, unit: ing.unit, qty: n }])
+    // для инвентаризации фиксируем учётный остаток на момент добавления строки
+    setLines((ls) => [...ls.filter((l) => l.ingredientId !== ing.id), { ingredientId: ing.id, name: ing.name, unit: ing.unit, qty: n, booked: isInv ? ing.stock : undefined }])
     setQty('')
   }
   const removeLine = (id: string) => setLines((ls) => ls.filter((l) => l.ingredientId !== id))
 
   const provesti = () => {
     if (!type || lines.length === 0) return
-    const doc = createStoreDoc(type, lines, isWriteoff ? { reason } : undefined)
+    if (isMake && !(parseFloat(resultQty.replace(',', '.')) > 0)) { alert('Укажите количество результата'); return }
+    const resIng = ingredients.find((i) => i.id === resultId)
+    const opts = {
+      ...(isWriteoff ? { reason } : {}),
+      ...(isTransfer || isSale ? { store } : {}),
+      ...(isTransfer ? { toStore } : {}),
+      ...(isMake && resIng ? { result: `${resIng.name} × ${resultQty} ${resIng.unit}` } : {}),
+    }
+    const doc = createStoreDoc(type, lines, opts)
     printToast(`${type} №${doc.id} проведён · позиций: ${lines.length}`)
     reset()
   }
@@ -60,12 +77,13 @@ export default function DocumentsScreen() {
             <div className="text-pos-accent text-sm uppercase mb-2">История документов</div>
             {documents.length === 0 ? <div className="text-white/40 text-sm">Документов ещё нет.</div> : (
               <table className="w-full text-sm max-w-3xl">
-                <thead className="text-white/50 text-left"><tr><th className="p-2">№</th><th>Тип</th><th>Дата</th><th>Кто</th><th className="text-right">Позиций</th></tr></thead>
+                <thead className="text-white/50 text-left"><tr><th className="p-2">№</th><th>Тип</th><th>Склад</th><th>Дата</th><th>Кто</th><th className="text-right">Позиций</th></tr></thead>
                 <tbody>
                   {documents.map((d) => (
                     <tr key={d.id} className="border-b border-white/10">
                       <td className="p-2">{d.id}</td>
-                      <td>{d.type}{d.reason ? ` · ${d.reason}` : ''}</td>
+                      <td>{d.type}{d.reason ? ` · ${d.reason}` : ''}{d.result ? ` → ${d.result}` : ''}</td>
+                      <td>{d.toStore ? `${d.store} → ${d.toStore}` : d.store}</td>
                       <td>{d.at}</td>
                       <td>{d.by}</td>
                       <td className="text-right">{d.lines.length}</td>
@@ -80,8 +98,44 @@ export default function DocumentsScreen() {
             <div className="flex items-center gap-3 mb-4">
               <button onClick={reset} className="text-white/60 hover:text-white">‹ к типам</button>
               <div className="text-lg">{type}</div>
-              <div className="text-white/40 text-sm ml-auto">Склад: Основной</div>
             </div>
+
+            {/* склады: для перемещения — источник+получатель, для расходной — склад-источник */}
+            {(isTransfer || isSale) && (
+              <div className="flex items-end gap-3 mb-4">
+                <label className="flex-1">
+                  <div className="text-white/60 text-sm mb-1">{isTransfer ? 'Склад-источник' : 'Склад списания'}</div>
+                  <select value={store} onChange={(e) => setStore(e.target.value)} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
+                    {warehouses.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </label>
+                {isTransfer && (
+                  <label className="flex-1">
+                    <div className="text-white/60 text-sm mb-1">Склад-получатель</div>
+                    <select value={toStore} onChange={(e) => setToStore(e.target.value)} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
+                      {warehouses.filter((w) => w !== store).map((w) => <option key={w} value={w}>{w}</option>)}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
+
+            {/* результат приготовления/переработки */}
+            {isMake && (
+              <div className="flex items-end gap-3 mb-4 bg-white/5 rounded-lg p-3">
+                <label className="flex-1">
+                  <div className="text-white/60 text-sm mb-1">Результат (что приготовлено)</div>
+                  <select value={resultId} onChange={(e) => setResultId(e.target.value)} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
+                    {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+                  </select>
+                </label>
+                <label className="w-36">
+                  <div className="text-white/60 text-sm mb-1">Кол-во результата</div>
+                  <input value={resultQty} onChange={(e) => setResultQty(e.target.value)} inputMode="decimal" placeholder="0"
+                    className="w-full h-11 rounded-md px-3 bg-white text-gray-800" />
+                </label>
+              </div>
+            )}
 
             {isWriteoff && (
               <div className="mb-4">
@@ -97,7 +151,7 @@ export default function DocumentsScreen() {
             {/* добавление строки */}
             <div className="flex items-end gap-2 mb-3">
               <label className="flex-1">
-                <div className="text-white/60 text-sm mb-1">Товар</div>
+                <div className="text-white/60 text-sm mb-1">{isMake ? 'Списать ингредиент' : 'Товар'}</div>
                 <select value={ingId} onChange={(e) => setIngId(e.target.value)} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
                   {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit}, ост. {i.stock})</option>)}
                 </select>
@@ -112,14 +166,32 @@ export default function DocumentsScreen() {
 
             {/* строки документа */}
             <div className="bg-white/5 rounded-lg overflow-hidden mb-4">
-              {lines.length === 0 ? <div className="p-3 text-white/40 text-sm">Добавьте позиции в документ.</div> : lines.map((l) => (
-                <div key={l.ingredientId} className="flex items-center gap-3 px-3 py-2 border-b border-white/10">
-                  <span className="flex-1">{l.name}</span>
-                  <span className="text-white/60">{l.qty} {l.unit}</span>
-                  {!isInv && <span className="text-white/40 w-28 text-right">{formatTenge(lineCost(l))}</span>}
-                  <button onClick={() => removeLine(l.ingredientId)} className="text-white/40 hover:text-pos-rose">✕</button>
+              {isInv && lines.length > 0 && (
+                <div className="flex items-center gap-3 px-3 py-2 text-xs text-white/40 border-b border-white/10">
+                  <span className="flex-1">Товар</span><span className="w-24 text-right">Учётный</span><span className="w-24 text-right">Факт</span><span className="w-24 text-right">Отклонение</span><span className="w-6" />
                 </div>
-              ))}
+              )}
+              {lines.length === 0 ? <div className="p-3 text-white/40 text-sm">Добавьте позиции в документ.</div> : lines.map((l) => {
+                const dev = isInv ? +(l.qty - (l.booked ?? 0)).toFixed(3) : 0
+                return (
+                  <div key={l.ingredientId} className="flex items-center gap-3 px-3 py-2 border-b border-white/10">
+                    <span className="flex-1">{l.name}</span>
+                    {isInv ? (
+                      <>
+                        <span className="w-24 text-right text-white/50">{l.booked ?? 0} {l.unit}</span>
+                        <span className="w-24 text-right">{l.qty} {l.unit}</span>
+                        <span className={`w-24 text-right ${dev === 0 ? 'text-white/40' : dev < 0 ? 'text-pos-rose' : 'text-pos-green'}`}>{dev > 0 ? '+' : ''}{dev} {l.unit}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-white/60">{l.qty} {l.unit}</span>
+                        <span className="text-white/40 w-28 text-right">{formatTenge(lineCost(l))}</span>
+                      </>
+                    )}
+                    <button onClick={() => removeLine(l.ingredientId)} className="text-white/40 hover:text-pos-rose w-6">✕</button>
+                  </div>
+                )
+              })}
             </div>
 
             <div className="flex gap-3">

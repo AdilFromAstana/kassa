@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { usePos } from '../store/pos'
-import { staff } from '../mock/data'
 import { formatTenge } from '../lib/money'
 
 // Возврат оплаты (FRONT_03) — 1:1 с iikoFront: (опц. выбор позиций) → причина →
@@ -26,6 +25,7 @@ export default function RefundModal({
   const user = usePos((s) => s.user)
   const hasRightFor = usePos((s) => s.hasRightFor)
   const cashInDrawer = usePos((s) => s.cashInDrawer)
+  const staff = usePos((s) => s.staffList)
   const [reason, setReason] = useState('')
   const [restock, setRestock] = useState(false)
   const [method, setMethod] = useState<'cash' | 'card'>('cash')

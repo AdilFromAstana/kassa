@@ -1,4 +1,8 @@
 import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor } from '../types'
+import { todayISO, addDaysISO } from '../lib/date'
+
+// Склады заведения (для документов: списание/перемещение/инвентаризация).
+export const warehouses = ['Основной склад', 'Бар', 'Кухонный цех']
 
 // KZ Сотрудники (мок). PIN — 4 цифры (как на реальной кассе).
 export const staff: Staff[] = [
@@ -50,9 +54,9 @@ export const cashOutTypes = ['Изъятие (инкассация)', 'Изъя�
 
 // Стартовые банкеты/резервы (мок).
 export const initialBanquets: Banquet[] = [
-  { id: 1, type: 'Резерв', status: 'Действует', hallId: 'h-hall', tableId: 't-4', date: 'Сегодня', time: '18:00', guests: 6, clientName: 'Алия', clientPhone: '+7 701 234 56 78', comment: 'У окна', prepayment: 0 },
-  { id: 2, type: 'Банкет', status: 'Действует', hallId: 'h-veranda', tableId: 't-v3', date: 'Сегодня', time: '19:30', guests: 12, clientName: 'ТОО «Астана»', clientPhone: '+7 717 000 11 22', comment: 'Поставить цветы', prepayment: 50000 },
-  { id: 3, type: 'Резерв', status: 'Действует', hallId: 'h-hall', tableId: 't-7', date: 'Завтра', time: '13:00', guests: 8, clientName: 'Данияр', clientPhone: '+7 705 111 22 33', comment: '', prepayment: 0 },
+  { id: 1, type: 'Резерв', status: 'Действует', hallId: 'h-hall', tableId: 't-4', date: todayISO(), time: '18:00', guests: 6, clientName: 'Алия', clientPhone: '+7 701 234 56 78', comment: 'У окна', prepayment: 0, durationMin: 120 },
+  { id: 2, type: 'Банкет', status: 'Действует', hallId: 'h-veranda', tableId: 't-v3', date: todayISO(), time: '19:30', guests: 12, clientName: 'ТОО «Астана»', clientPhone: '+7 717 000 11 22', comment: 'Поставить цветы', prepayment: 50000, prepaymentMethod: 'Банковские карты', durationMin: 180 },
+  { id: 3, type: 'Резерв', status: 'Действует', hallId: 'h-hall', tableId: 't-7', date: addDaysISO(todayISO(), 1), time: '13:00', guests: 8, clientName: 'Данияр', clientPhone: '+7 705 111 22 33', comment: '', prepayment: 0, durationMin: 120 },
 ]
 
 // KZ Фискальные регистраторы (Webkassa) — мок, 2 ФР на кассе (разные юрлица).
