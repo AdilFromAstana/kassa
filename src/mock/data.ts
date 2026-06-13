@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor } from '../types'
 
 // KZ Сотрудники (мок). PIN — 4 цифры (как на реальной кассе).
 export const staff: Staff[] = [
@@ -74,6 +74,13 @@ export const messages: Message[] = [
   { id: 1, from: 'Управляющий', date: 'Сегодня 09:30', title: 'План продаж на месяц', body: 'Целевая выручка обновлена. Акцент на кофе и десерты — мотивационная программа активна.', unread: true },
   { id: 2, from: 'Шеф-повар', date: 'Сегодня 08:10', title: 'Стоп-лист на утро', body: 'Бесбармак временно недоступен (нет конины). Обновите при поступлении.', unread: true, important: true },
   { id: 3, from: 'Бухгалтерия', date: 'Вчера 18:40', title: 'Переход на ҚҚС 16%', body: 'С 01.01.2026 ставка НДС 16%. Проверьте налоговые категории и Webkassa.', unread: false, important: true },
+]
+
+// Контрагенты-поставщики (KZ, БИН/ИИН) — мок.
+export const contractors: Contractor[] = [
+  { id: 'c-meat', name: 'ТОО «Мясокомбинат Астана»', bin: '050340001234' },
+  { id: 'c-veg', name: 'ИП Овощебаза', bin: '870101300555' },
+  { id: 'c-drinks', name: 'ТОО «Напитки KZ»', bin: '120640002233' },
 ]
 
 export const tablesByHall = (hallId: string) => tables.filter((t) => t.hallId === hallId)

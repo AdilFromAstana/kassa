@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import type {
-  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem,
+  Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff,
 } from '../types'
 import { findDish } from '../mock/menu'
-import { findStaffByPin, initialBanquets, messages as messagesSeed } from '../mock/data'
+import { findStaffByPin, initialBanquets, messages as messagesSeed, contractors as contractorsSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -55,6 +55,15 @@ function loadPriceOverrides(): Record<string, number> {
 function loadTechCards(): Record<string, TechCardItem[]> {
   try { const raw = localStorage.getItem('iiko-techcards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
+}
+
+function loadContractors(): Contractor[] {
+  try { const raw = localStorage.getItem('iiko-contractors'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return contractorsSeed.map((c) => ({ ...c }))
+}
+function loadInvoices(): Invoice[] {
+  try { const raw = localStorage.getItem('iiko-invoices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return []
 }
 
 // Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
@@ -131,6 +140,9 @@ interface PosState {
   techCardOverrides: Record<string, TechCardItem[]> // техкарты из офиса (dishId → закладка)
   roleRights: Record<string, string[]> // карта должность→права (из офиса)
   messages: Message[] // внутренние сообщения / новости
+  contractors: Contractor[] // поставщики (KZ, БИН/ИИН)
+  invoices: Invoice[] // приходные накладные / входящие ЭСФ
+  invSeq: number
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -178,6 +190,8 @@ interface PosState {
   hasRightFor: (positions: string[] | undefined, code: string) => boolean // право для произвольных должностей
   toggleRoleRight: (position: string, code: string) => void // правка карты прав в офисе
   markMessageRead: (id: number) => void
+  addContractor: (name: string, bin: string) => void
+  addPurchase: (supplierId: string, lines: InvoiceLine[]) => Invoice | null // приходная + ЭСФ + приход на склад
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
@@ -220,6 +234,9 @@ export const usePos = create<PosState>((set, get) => ({
   techCardOverrides: loadTechCards(),
   roleRights: loadRoleRights(),
   messages: messagesSeed.map((m) => ({ ...m })),
+  contractors: loadContractors(),
+  invoices: loadInvoices(),
+  invSeq: loadInvoices().length,
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -505,6 +522,30 @@ export const usePos = create<PosState>((set, get) => ({
   },
   hasRightFor: (positions, code) => hasRightIn(get().roleRights, positions, code),
   markMessageRead: (id) => set((st) => ({ messages: st.messages.map((m) => (m.id === id ? { ...m, unread: false } : m)) })),
+
+  addContractor: (name, bin) => set((st) => {
+    if (!name || !bin || st.contractors.some((c) => c.bin === bin)) return st
+    const contractors = [...st.contractors, { id: 'c-' + bin, name, bin }]
+    try { localStorage.setItem('iiko-contractors', JSON.stringify(contractors)) } catch { /* ignore */ }
+    return { contractors }
+  }),
+  // Приходная накладная (KZ): создаёт входящую ЭСФ + приходует ингредиенты на склад.
+  addPurchase: (supplierId, lines) => {
+    const sup = get().contractors.find((c) => c.id === supplierId)
+    if (!sup || lines.length === 0) return null
+    const total = +lines.reduce((s, l) => s + l.qty * l.price, 0).toFixed(2)
+    const vat = +(total - total / 1.16).toFixed(2) // ҚҚС 16% в т.ч.
+    const n = get().invSeq + 1
+    const inv: Invoice = { id: n, no: `ПН-${1000 + n}`, date: fullNow(), supplierName: sup.name, supplierBin: sup.bin, lines, total, vat, esfNo: `ESF-KZ-${100000 + n}` }
+    set((st) => {
+      const ingredients = st.ingredients.map((i) => { const l = lines.find((x) => x.ingredientId === i.id); return l ? { ...i, stock: +(i.stock + l.qty).toFixed(3) } : i })
+      persistIngredients(ingredients)
+      const invoices = [inv, ...st.invoices]
+      try { localStorage.setItem('iiko-invoices', JSON.stringify(invoices)) } catch { /* ignore */ }
+      return { invoices, invSeq: n, ingredients }
+    })
+    return inv
+  },
   toggleRoleRight: (position, code) => set((st) => {
     const cur = st.roleRights[position] ?? []
     const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]

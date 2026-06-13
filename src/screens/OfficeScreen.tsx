@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
+import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes } from '../mock/menu'
 import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
 import { staff } from '../mock/data'
@@ -25,12 +26,13 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports'
+type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports' | 'accounting'
 const NAV: { id: Section | null; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
+  { id: 'accounting', label: 'Бухгалтерия (KZ)' },
   { id: 'reports', label: 'Отчёты' },
 ]
 
@@ -38,12 +40,28 @@ export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
-    techCardOverrides, setTechCard } = usePos()
+    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [editDish, setEditDish] = useState('')
+  // бухгалтерия (KZ)
+  const [cName, setCName] = useState(''); const [cBin, setCBin] = useState('')
+  const [supplierId, setSupplierId] = useState('')
+  const [pLines, setPLines] = useState<{ ingredientId: string; name: string; qty: number; price: number }[]>([])
+  const [pIng, setPIng] = useState(ingredients[0]?.id ?? ''); const [pQty, setPQty] = useState(''); const [pPrice, setPPrice] = useState('')
+  const addPLine = () => {
+    const ing = ingredients.find((i) => i.id === pIng); const q = parseFloat(pQty.replace(',', '.')); const pr = parseFloat(pPrice.replace(',', '.'))
+    if (!ing || !(q > 0) || !(pr > 0)) return
+    setPLines((ls) => [...ls.filter((l) => l.ingredientId !== ing.id), { ingredientId: ing.id, name: ing.name, qty: q, price: pr }]); setPQty(''); setPPrice('')
+  }
+  const provesti = () => {
+    if (!supplierId || pLines.length === 0) return
+    const inv = addPurchase(supplierId, pLines)
+    if (inv) { printToast(`Приходная ${inv.no} проведена · ЭСФ ${inv.esfNo}`); setPLines([]) }
+  }
 
   // сводка для раздела «Отчёты»
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
+  const vatKz = +(revenue - revenue / 1.16).toFixed(2) // ҚҚС 16% в т.ч. с продаж
   const avg = closedOrders.length ? revenue / closedOrders.length : 0
   const refSum = refunds.reduce((s, r) => s + r.amount, 0)
   const byType: Record<string, number> = {}
@@ -89,7 +107,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : 'Отчёты'}</div>
+          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : section === 'accounting' ? 'Бухгалтерия (KZ)' : 'Отчёты'}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -281,7 +299,7 @@ export default function OfficeScreen() {
               })()}
             </div>
           </div>
-        ) : (
+        ) : section === 'reports' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               Сводка по текущей смене (из закрытых чеков кассы). В реальном iikoOffice — OLAP-отчёты; здесь базовая сводка.
@@ -310,6 +328,84 @@ export default function OfficeScreen() {
             </div>
 
             <div className="text-gray-400 text-xs mt-4">Складских документов за сессию: {documents.length}</div>
+          </div>
+        ) : (
+          <div className="p-6 max-w-3xl">
+            <div className="text-xs text-gray-500 mb-5">
+              KZ-бухгалтерия: налоги с продаж (ҚҚС), контрагенты (БИН/ИИН) и приходные накладные → входящие ЭСФ.
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Налоги с продаж (KZ)</div>
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              <OfficeStat label="Выручка" value={formatTenge(revenue)} />
+              <OfficeStat label="ҚҚС 16% к уплате" value={formatTenge(vatKz)} />
+              <OfficeStat label="Без НДС" value={formatTenge(+(revenue - vatKz).toFixed(2))} />
+              <OfficeStat label="СНО · БИН" value="ОУР · 123456789012" />
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Контрагенты (поставщики)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-hidden mb-2">
+              {contractors.map((c) => (
+                <div key={c.id} className="flex items-center gap-3 px-4 h-11 border-b border-gray-100 last:border-0">
+                  <span className="flex-1">{c.name}</span>
+                  <span className="text-gray-500 font-mono text-xs">БИН/ИИН {c.bin}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mb-6">
+              <input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Наименование" className="h-9 rounded border border-gray-300 px-2 flex-1" />
+              <input value={cBin} onChange={(e) => setCBin(e.target.value)} placeholder="БИН / ИИН" className="h-9 rounded border border-gray-300 px-2 w-40" />
+              <button onClick={() => { addContractor(cName.trim(), cBin.trim()); setCName(''); setCBin('') }} className="h-9 px-4 rounded bg-blue-600 text-white text-sm">Добавить</button>
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Приходная накладная → входящая ЭСФ</div>
+            <div className="bg-white border border-gray-200 rounded-md p-4 mb-3">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-gray-500">Поставщик:</span>
+                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="h-9 rounded border border-gray-300 px-2 flex-1">
+                  <option value="">— выберите —</option>
+                  {contractors.map((c) => <option key={c.id} value={c.id}>{c.name} (БИН {c.bin})</option>)}
+                </select>
+              </div>
+              <div className="flex items-end gap-2 mb-3">
+                <select value={pIng} onChange={(e) => setPIng(e.target.value)} className="h-9 rounded border border-gray-300 px-2 flex-1">
+                  {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+                </select>
+                <input value={pQty} onChange={(e) => setPQty(e.target.value)} inputMode="decimal" placeholder="кол-во" className="w-24 h-9 rounded border border-gray-300 px-2 text-right" />
+                <input value={pPrice} onChange={(e) => setPPrice(e.target.value)} inputMode="decimal" placeholder="цена ₸" className="w-28 h-9 rounded border border-gray-300 px-2 text-right" />
+                <button onClick={addPLine} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">+ строка</button>
+              </div>
+              {pLines.length > 0 && (
+                <div className="border border-gray-100 rounded mb-3">
+                  {pLines.map((l) => (
+                    <div key={l.ingredientId} className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 last:border-0 text-sm">
+                      <span className="flex-1">{l.name}</span><span className="text-gray-500">{l.qty} × {formatTenge(l.price)}</span><span className="w-24 text-right">{formatTenge(l.qty * l.price)}</span>
+                      <button onClick={() => setPLines((ls) => ls.filter((x) => x.ingredientId !== l.ingredientId))} className="text-gray-400 hover:text-red-500">✕</button>
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-3 py-1.5 text-sm font-semibold"><span>Итого (с ҚҚС)</span><span>{formatTenge(pLines.reduce((s, l) => s + l.qty * l.price, 0))}</span></div>
+                </div>
+              )}
+              <button onClick={provesti} disabled={!supplierId || pLines.length === 0}
+                className={`h-9 px-4 rounded text-sm ${supplierId && pLines.length ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Провести (приход + ЭСФ)</button>
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Входящие ЭСФ / приходные</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              {invoices.length === 0 ? <div className="p-3 text-gray-400 text-sm">Накладных пока нет.</div> : (
+                <table className="w-full text-sm">
+                  <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">№</th><th>Дата</th><th>Поставщик</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС</th><th className="p-2">ЭСФ</th></tr></thead>
+                  <tbody>
+                    {invoices.map((inv) => (
+                      <tr key={inv.id} className="border-b border-gray-100 last:border-0">
+                        <td className="p-2">{inv.no}</td><td>{inv.date.split(',')[0]}</td><td>{inv.supplierName}</td>
+                        <td className="text-right">{formatTenge(inv.total)}</td><td className="text-right">{formatTenge(inv.vat)}</td><td className="p-2 font-mono text-xs">{inv.esfNo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         )}
       </div>

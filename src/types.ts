@@ -162,6 +162,27 @@ export interface Staff {
   positions: string[]
 }
 
+export interface Contractor {
+  id: string
+  name: string
+  bin: string // БИН (ТОО) / ИИН (ИП)
+}
+
+export interface InvoiceLine { ingredientId: string; name: string; qty: number; price: number }
+
+// Приходная накладная (KZ) = входящая ЭСФ от поставщика. Увеличивает остаток склада.
+export interface Invoice {
+  id: number
+  no: string          // № приходной накладной
+  date: string
+  supplierName: string
+  supplierBin: string
+  lines: InvoiceLine[]
+  total: number       // сумма с ҚҚС
+  vat: number         // ҚҚС в т.ч. (16%)
+  esfNo: string       // № входящей ЭСФ (ИС ЭСФ)
+}
+
 export interface Message {
   id: number
   from: string
