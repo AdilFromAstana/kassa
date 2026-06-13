@@ -6,10 +6,10 @@ export const warehouses = ['Основной склад', 'Бар', 'Кухон�
 
 // KZ Сотрудники (мок). PIN — 4 цифры (как на реальной кассе).
 export const staff: Staff[] = [
-  { id: 's-petrov', name: 'Петров К.С.', pin: '1111', positions: ['Кассир', 'Менеджер'] },
-  { id: 's-ivanova', name: 'Иванова А.А.', pin: '2222', positions: ['Официант'] },
-  { id: 's-legasov', name: 'Легасов И.Н.', pin: '3333', positions: ['Официант', 'Бармен'] },
-  { id: 's-admin', name: 'Администратор', pin: '0000', positions: ['Менеджер', 'Кассир'] },
+  { id: 's-petrov', name: 'Петров К.С.', pin: '1111', positions: ['Кассир', 'Менеджер'], card: '0004915711' },
+  { id: 's-ivanova', name: 'Иванова А.А.', pin: '2222', positions: ['Официант'], card: '0004915722' },
+  { id: 's-legasov', name: 'Легасов И.Н.', pin: '3333', positions: ['Официант', 'Бармен'], card: '0004915733' },
+  { id: 's-admin', name: 'Администратор', pin: '0000', positions: ['Менеджер', 'Кассир'], card: '0004915700' },
 ]
 
 export const halls: Hall[] = [

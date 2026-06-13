@@ -271,6 +271,7 @@ interface PosState {
 
   // auth / shifts
   login: (pin: string) => Staff | null
+  loginByCard: (card: string) => Staff | null
   logout: () => void
   openPersonalShift: (position: string) => void
   closePersonalShift: () => void
@@ -435,6 +436,11 @@ export const usePos = create<PosState>((set, get) => ({
 
   login: (pin) => {
     const s = get().staffList.find((x) => x.pin === pin) ?? null
+    if (s) set({ user: s })
+    return s
+  },
+  loginByCard: (card) => {
+    const s = get().staffList.find((x) => x.card && x.card === card) ?? null
     if (s) set({ user: s })
     return s
   },

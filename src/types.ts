@@ -218,6 +218,7 @@ export interface Staff {
   name: string
   pin: string
   positions: string[]
+  card?: string // номер магнитной карты сотрудника (вход прокаткой карты)
 }
 
 // Выплата сотруднику (платёжная ведомость iiko): аванс (середина месяца) или расчёт (конец).

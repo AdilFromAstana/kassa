@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, UserRound, Info } from 'lucide-react'
+import { ChevronLeft, UserRound, Info, CreditCard } from 'lucide-react'
 import { usePos } from '../store/pos'
 import { fiscalRegistrators } from '../mock/data'
 import NumPad from '../components/NumPad'
 import type { Staff } from '../types'
 
-// Стартовый экран: вход по 4-значному PIN ИЛИ из списка сотрудников → выбор должности (личная смена).
-type Mode = 'pin' | 'list'
+// Стартовый экран: вход по 4-значному PIN, из списка сотрудников или по магнитной карте → выбор должности.
+type Mode = 'pin' | 'list' | 'card'
 
 export default function LoginScreen() {
   const navigate = useNavigate()
-  const { login, openPersonalShift, staffList, establishment } = usePos()
+  const { login, loginByCard, openPersonalShift, staffList, establishment } = usePos()
   const [mode, setMode] = useState<Mode>('pin')
+  const [card, setCard] = useState('')
+  const [cardErr, setCardErr] = useState('')
   const [picked, setPicked] = useState<Staff | null>(null) // выбран из списка → вводит свой PIN
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
@@ -34,8 +36,15 @@ export default function LoginScreen() {
   }
 
   const choosePosition = (position: string) => { openPersonalShift(position); navigate('/menu') }
-  const backToStart = () => { setPicked(null); setPin(''); setError('') }
+  const backToStart = () => { setPicked(null); setPin(''); setError(''); setCard(''); setCardErr('') }
   const switchMode = (m: Mode) => { setMode(m); backToStart() }
+
+  // прокатка магнитной карты (мок ридера)
+  const swipe = (value: string) => {
+    const s = loginByCard(value)
+    if (s) { setAuthed(s); setCardErr('') }
+    else { setCardErr('Карта не распознана'); setCard('') }
+  }
 
   return (
     <div className="h-full bg-pos-bg text-white flex items-center justify-center"
@@ -46,13 +55,34 @@ export default function LoginScreen() {
 
           {/* переключатель способа входа */}
           <div className="flex gap-1 bg-black/30 rounded-lg p-1">
-            {([['pin', 'По PIN'], ['list', 'Список сотрудников']] as const).map(([m, label]) => (
+            {([['pin', 'По PIN'], ['list', 'Список'], ['card', 'Карта']] as const).map(([m, label]) => (
               <button key={m} onClick={() => switchMode(m)}
                 className={`h-9 px-4 rounded-md text-sm ${mode === m ? 'bg-pos-blue text-white' : 'text-white/60 hover:text-white'}`}>{label}</button>
             ))}
           </div>
 
-          {mode === 'list' && !picked ? (
+          {mode === 'card' ? (
+            <div className="flex flex-col items-center gap-4 w-[420px]">
+              <div className="text-white/60 text-sm flex items-center gap-2"><CreditCard size={18} /> Проведите магнитную карту через считыватель</div>
+              <form onSubmit={(e) => { e.preventDefault(); if (card.trim()) swipe(card.trim()) }} className="w-full flex gap-2">
+                <input value={card} onChange={(e) => { setCard(e.target.value.replace(/\D/g, '')); setCardErr('') }} autoFocus
+                  inputMode="numeric" placeholder="номер карты"
+                  className="flex-1 h-11 rounded-md px-3 text-gray-800 outline-none" />
+                <button type="submit" disabled={!card.trim()} className="h-11 px-5 rounded-md bg-pos-blue text-white disabled:opacity-40">Войти</button>
+              </form>
+              <div className="h-5 text-pos-rose text-sm">{cardErr}</div>
+              <div className="text-xs text-white/40 self-start">Симуляция считывателя (мок) — нажмите карту:</div>
+              <div className="grid grid-cols-2 gap-2 w-full">
+                {staffList.filter((s) => s.card).map((s) => (
+                  <button key={s.id} onClick={() => swipe(s.card!)}
+                    className="h-14 rounded-md bg-white/10 hover:bg-white/20 px-3 flex items-center gap-3 text-left">
+                    <CreditCard size={18} className="text-white/50 shrink-0" />
+                    <span><span className="block">{s.name}</span><span className="text-xs text-white/40">карта •••{s.card!.slice(-4)}</span></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : mode === 'list' && !picked ? (
             <div className="grid grid-cols-2 gap-2 w-[420px]">
               {staffList.map((s) => (
                 <button key={s.id} onClick={() => { setPicked(s); setPin(''); setError('') }}
