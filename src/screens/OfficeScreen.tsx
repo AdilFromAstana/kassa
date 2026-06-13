@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
@@ -26,15 +26,24 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports' | 'accounting'
-const NAV: { id: Section | null; label: string }[] = [
+type Section = 'settings' | 'menu' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
+const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
+  { id: 'payroll', label: 'Зарплата (KZ)' },
   { id: 'reports', label: 'Отчёты' },
 ]
+
+// Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
+const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
+const ROLE_SECTIONS: Record<string, Section[]> = {
+  'Администратор': ['settings', 'menu', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
+  'Управляющий': ['settings', 'menu', 'stock', 'accounting', 'payroll', 'reports'],
+  'Бухгалтер': ['accounting', 'payroll', 'reports', 'stock'],
+}
 
 export default function OfficeScreen() {
   const navigate = useNavigate()
@@ -42,6 +51,11 @@ export default function OfficeScreen() {
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
     techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase } = usePos()
   const [section, setSection] = useState<Section>('settings')
+  const [role, setRole] = useState<string>('Администратор')
+  const [salary, setSalary] = useState<Record<string, number>>({})
+  const allowed = ROLE_SECTIONS[role]
+  const visibleNav = NAV.filter((n) => allowed.includes(n.id))
+  useEffect(() => { if (!allowed.includes(section)) setSection(allowed[0]) }, [role]) // роль сменилась → перейти на доступный раздел
   const [editDish, setEditDish] = useState('')
   // бухгалтерия (KZ)
   const [cName, setCName] = useState(''); const [cBin, setCBin] = useState('')
@@ -62,6 +76,11 @@ export default function OfficeScreen() {
   // сводка для раздела «Отчёты»
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
   const vatKz = +(revenue - revenue / 1.16).toFixed(2) // ҚҚС 16% в т.ч. с продаж
+  const exportTo1C = () => {
+    const data = { сформирован: 'демо', выручка: revenue, ҚҚС_к_уплате: vatKz, чеков: closedOrders.length, входящих_ЭСФ: invoices.length, накладные: invoices }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'iiko-1c-export.json'; a.click(); URL.revokeObjectURL(a.href)
+  }
   const avg = closedOrders.length ? revenue / closedOrders.length : 0
   const refSum = refunds.reduce((s, r) => s + r.amount, 0)
   const byType: Record<string, number> = {}
@@ -88,13 +107,17 @@ export default function OfficeScreen() {
       {/* сайдбар */}
       <div className="w-60 bg-slate-800 text-white flex flex-col shrink-0">
         <div className="h-14 flex items-center px-5 font-semibold border-b border-white/10">iikoOffice <span className="text-white/40 text-xs ml-2">мок</span></div>
-        <nav className="flex-1 py-2">
-          {NAV.map((n) => (
-            <button key={n.label} disabled={!n.id} onClick={() => n.id && setSection(n.id)}
-              className={`w-full text-left px-5 h-11 flex items-center text-sm ${
-                n.id === section ? 'bg-white/10 border-l-2 border-emerald-400 font-medium'
-                : n.id ? 'text-white/70 hover:bg-white/5' : 'text-white/40 cursor-default'}`}>
-              {n.label}{!n.id && <span className="ml-auto text-[10px] text-white/30">скоро</span>}
+        <div className="px-4 py-3 border-b border-white/10">
+          <div className="text-white/40 text-[11px] mb-1">Роль (вход в офис)</div>
+          <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full h-9 rounded bg-white/10 text-white px-2 text-sm">
+            {OFFICE_ROLES.map((r) => <option key={r} value={r} className="text-gray-800">{r}</option>)}
+          </select>
+        </div>
+        <nav className="flex-1 py-2 overflow-auto">
+          {visibleNav.map((n) => (
+            <button key={n.id} onClick={() => setSection(n.id)}
+              className={`w-full text-left px-5 h-11 flex items-center text-sm ${n.id === section ? 'bg-white/10 border-l-2 border-emerald-400 font-medium' : 'text-white/70 hover:bg-white/5'}`}>
+              {n.label}
             </button>
           ))}
         </nav>
@@ -107,7 +130,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : section === 'accounting' ? 'Бухгалтерия (KZ)' : 'Отчёты'}</div>
+          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : section === 'stock' ? 'Номенклатура и техкарты' : section === 'accounting' ? 'Бухгалтерия (KZ)' : section === 'payroll' ? 'Зарплата (KZ)' : 'Отчёты'}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -327,9 +350,12 @@ export default function OfficeScreen() {
                 ))}
             </div>
 
-            <div className="text-gray-400 text-xs mt-4">Складских документов за сессию: {documents.length}</div>
+            <div className="text-gray-400 text-xs mt-4 flex items-center gap-3">
+              <span>Складских документов за сессию: {documents.length}</span>
+              <button onClick={exportTo1C} className="h-8 px-3 rounded bg-slate-700 text-white text-xs">Выгрузить в 1С (JSON)</button>
+            </div>
           </div>
-        ) : (
+        ) : section === 'accounting' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               KZ-бухгалтерия: налоги с продаж (ҚҚС), контрагенты (БИН/ИИН) и приходные накладные → входящие ЭСФ.
@@ -405,6 +431,38 @@ export default function OfficeScreen() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 max-w-3xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Зарплата и налоги РК (упрощённо): ОПВ 10%, ВОСМС 2%, ИПН 10% (после ОПВ/ВОСМС), СО 3.5% (работодатель). Оклад редактируется.
+            </div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2">Сотрудник</th><th>Должность</th><th className="text-right">Оклад ₸</th><th className="text-right">ОПВ</th><th className="text-right">ВОСМС</th><th className="text-right">ИПН</th><th className="text-right">На руки</th><th className="text-right p-2">СО (раб-ль)</th>
+                </tr></thead>
+                <tbody>
+                  {staff.map((p) => {
+                    const okl = salary[p.id] ?? 250000
+                    const opv = Math.round(okl * 0.10), vosms = Math.round(okl * 0.02)
+                    const ipn = Math.round((okl - opv - vosms) * 0.10)
+                    const net = okl - opv - vosms - ipn, so = Math.round(okl * 0.035)
+                    return (
+                      <tr key={p.id} className="border-b border-gray-100 last:border-0">
+                        <td className="p-2">{p.name}</td><td className="text-gray-500">{p.positions[0]}</td>
+                        <td className="text-right"><input type="number" value={okl} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-28 h-8 rounded border border-gray-300 px-2 text-right" /></td>
+                        <td className="text-right text-gray-600">{formatTenge(opv)}</td>
+                        <td className="text-right text-gray-600">{formatTenge(vosms)}</td>
+                        <td className="text-right text-gray-600">{formatTenge(ipn)}</td>
+                        <td className="text-right font-semibold">{formatTenge(net)}</td>
+                        <td className="text-right p-2 text-gray-500">{formatTenge(so)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
