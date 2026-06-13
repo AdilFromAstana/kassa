@@ -25,6 +25,8 @@ export default function PaymentScreen() {
   const pos = usePos()
   const order = pos.currentOrder()
   const [receipt, setReceipt] = useState<ClosedOrder | null>(null)
+  const [send, setSend] = useState<'email' | 'sms' | null>(null) // отправка чека
+  const [sendTo, setSendTo] = useState('')
 
   const paymentTypes = pos.paymentTypes
   const tabs = paymentTypes.filter((p) => p.active)
@@ -59,11 +61,32 @@ export default function PaymentScreen() {
             <div className="text-center text-xs text-gray-400 mt-3">ФД №{receipt.fiscalDocNo} · {receipt.paidAt}</div>
           </div>
         </div>
-        <div className="h-16 bg-white flex items-center justify-center gap-4">
-          {pos.currentOrder() && <button onClick={() => navigate('/order')} className="h-12 px-8 rounded-md bg-pos-green text-white">К заказу (остались гости)</button>}
-          <button onClick={() => navigate('/halls')} className="h-12 px-8 rounded-md bg-pos-blue text-white">К столам</button>
-          <button onClick={() => navigate('/menu')} className="h-12 px-8 rounded-md bg-gray-200 text-gray-700">В меню</button>
+        <div className="h-16 bg-white flex items-center justify-center gap-3 flex-wrap">
+          <button onClick={() => { setSend('email'); setSendTo('') }} className="h-12 px-5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100">Чек на e-mail</button>
+          <button onClick={() => { setSend('sms'); setSendTo('') }} className="h-12 px-5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100">Чек по SMS</button>
+          {pos.currentOrder() && <button onClick={() => navigate('/order')} className="h-12 px-6 rounded-md bg-pos-green text-white">К заказу (остались гости)</button>}
+          <button onClick={() => navigate('/halls')} className="h-12 px-6 rounded-md bg-pos-blue text-white">К столам</button>
+          <button onClick={() => navigate('/menu')} className="h-12 px-6 rounded-md bg-gray-200 text-gray-700">В меню</button>
         </div>
+
+        {send && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setSend(null)}>
+            <div className="bg-white text-gray-800 rounded-lg w-[360px] p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="font-semibold mb-1">{send === 'email' ? 'Отправить чек на e-mail' : 'Отправить чек по SMS'}</div>
+              <div className="text-xs text-gray-500 mb-3">ФД №{receipt.fiscalDocNo} · {formatTenge(receipt.total)} (Webkassa)</div>
+              <input value={sendTo} onChange={(e) => setSendTo(e.target.value)} autoFocus
+                inputMode={send === 'email' ? 'email' : 'tel'}
+                placeholder={send === 'email' ? 'guest@mail.kz' : '+7 7XX XXX XX XX'}
+                className="w-full h-11 rounded-md border border-gray-300 px-3 outline-none" />
+              <div className="flex gap-2 mt-4">
+                <button disabled={!sendTo.trim()}
+                  onClick={() => { printToast(`Чек ФД №${receipt.fiscalDocNo} отправлен ${send === 'email' ? 'на ' : 'по SMS: '}${sendTo.trim()}`); setSend(null) }}
+                  className="flex-1 h-11 rounded-md bg-pos-blue text-white disabled:opacity-40">Отправить</button>
+                <button onClick={() => setSend(null)} className="h-11 px-5 rounded-md bg-gray-200">Отмена</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
