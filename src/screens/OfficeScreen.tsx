@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor } from 'lucide-react'
 import { usePos } from '../store/pos'
-import { menuGroups, dishesByGroup } from '../mock/menu'
+import { menuGroups, dishesByGroup, dishes } from '../mock/menu'
+import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
 import { staff } from '../mock/data'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -24,18 +25,19 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'staff'
+type Section = 'settings' | 'menu' | 'staff' | 'stock'
 const NAV: { id: Section | null; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'staff', label: 'Сотрудники и права' },
-  { id: null, label: 'Номенклатура и техкарты' },
+  { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: null, label: 'Отчёты' },
 ]
 
 export default function OfficeScreen() {
   const navigate = useNavigate()
-  const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight } = usePos()
+  const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
+    ingredients, receiveStock, setIngredientStock } = usePos()
   const [section, setSection] = useState<Section>('settings')
 
   const Toggle = ({ k, label, note }: { k: keyof Establishment; label: string; note: string }) => (
@@ -75,7 +77,7 @@ export default function OfficeScreen() {
       {/* контент */}
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
-          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : 'Сотрудники и права'}</div>
+          <div className="font-semibold">{section === 'settings' ? 'Настройки торгового предприятия' : section === 'menu' ? 'Меню и цены' : section === 'staff' ? 'Сотрудники и права' : 'Номенклатура и техкарты'}</div>
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
@@ -150,7 +152,7 @@ export default function OfficeScreen() {
               )
             })}
           </div>
-        ) : (
+        ) : section === 'staff' ? (
           <div className="p-6 max-w-4xl">
             <div className="text-xs text-gray-500 mb-5">
               Роли и права (как в iikoOffice). Галочки задают, что разрешено должности; касса применяет сразу
@@ -189,6 +191,64 @@ export default function OfficeScreen() {
                       ))}
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6 max-w-3xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Номенклатура и остатки (приход/инвентаризация — офисный контур). Касса списывает по техкартам при продаже.
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Товары на складе</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-6">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2 font-medium">Артикул</th><th className="p-2 font-medium">Товар</th><th className="p-2 font-medium">Ед.</th>
+                  <th className="p-2 font-medium text-right">Себест.</th><th className="p-2 font-medium text-right">Мин.</th><th className="p-2 font-medium text-right">Остаток (факт)</th><th className="p-2"></th>
+                </tr></thead>
+                <tbody>
+                  {ingredients.map((i) => (
+                    <tr key={i.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2 font-mono text-xs text-gray-400">{i.code}</td>
+                      <td className="p-2">{i.name}</td>
+                      <td className="p-2 text-gray-500">{i.unit}</td>
+                      <td className="p-2 text-right text-gray-600">{formatTenge(i.costPerUnit)}</td>
+                      <td className="p-2 text-right text-gray-400">{i.min}</td>
+                      <td className="p-2 text-right">
+                        <input type="number" value={i.stock} min={0}
+                          onChange={(e) => setIngredientStock(i.id, Math.max(0, parseFloat(e.target.value) || 0))}
+                          className="w-24 h-8 rounded border border-gray-300 px-2 text-right" />
+                      </td>
+                      <td className="p-2 text-right">
+                        <button onClick={() => { const v = window.prompt(`Приход «${i.name}», ${i.unit}:`, '0'); const n = parseFloat((v ?? '').replace(',', '.')); if (n > 0) receiveStock(i.id, n) }}
+                          className="h-8 px-3 rounded bg-emerald-500 text-white text-xs">+ Приход</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="text-gray-500 text-xs uppercase mb-2">Техкарты (только просмотр)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2 font-medium">Блюдо</th><th className="p-2 font-medium text-right">Себест.</th><th className="p-2 font-medium text-right">Доступно</th><th className="p-2 font-medium">Состав (на порцию)</th>
+                </tr></thead>
+                <tbody>
+                  {dishes.filter((d) => techCards[d.id]).map((d) => {
+                    const m = dishMaxPortions(d.id, ingredients)
+                    return (
+                      <tr key={d.id} className="border-b border-gray-100 last:border-0 align-top">
+                        <td className="p-2">{d.name}</td>
+                        <td className="p-2 text-right">{formatTenge(dishCost(d.id, ingredients))}</td>
+                        <td className="p-2 text-right">{m === Infinity ? '∞' : m}</td>
+                        <td className="p-2 text-gray-500 text-xs">{techCards[d.id].map((it) => { const ing = ingredients.find((x) => x.id === it.ingredientId); return ing ? `${ing.name} ${it.gross} ${ing.unit}` : it.ingredientId }).join(' · ')}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
