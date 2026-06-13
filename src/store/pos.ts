@@ -61,6 +61,19 @@ function loadPriceOverrides(): Record<string, number> {
   return {}
 }
 
+// Ценовые категории (Прейскурант): прайс-листы по категории гостя/карты.
+function loadPriceCategories(): { id: string; name: string }[] {
+  try { const raw = localStorage.getItem('iiko-price-categories'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return [{ id: 'base', name: 'Базовая' }, { id: 'vip', name: 'VIP' }, { id: 'staff', name: 'Персонал' }]
+}
+function loadCategoryPrices(): Record<string, Record<string, number>> {
+  try { const raw = localStorage.getItem('iiko-category-prices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistCategoryPrices(m: Record<string, Record<string, number>>) {
+  try { localStorage.setItem('iiko-category-prices', JSON.stringify(m)) } catch { /* ignore */ }
+}
+
 // Оверрайды техкарт из офиса (dishId → закладка). Касса списывает по ним.
 function loadTechCards(): Record<string, TechCardItem[]> {
   try { const raw = localStorage.getItem('iiko-techcards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -254,6 +267,9 @@ interface PosState {
   ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
+  priceCategories: { id: string; name: string }[] // ценовые категории (Прейскурант): базовая/VIP/персонал…
+  categoryPrices: Record<string, Record<string, number>> // цены по категории (catId → dishId → ₸); base — в priceOverrides
+  activePriceCategory: string // выбранная ценовая категория на кассе (по умолч. 'base')
   techCardOverrides: Record<string, TechCardItem[]> // техкарты из офиса (dishId → закладка)
   roleRights: Record<string, string[]> // карта должность→права (из офиса)
   messages: Message[] // внутренние сообщения / новости
@@ -339,8 +355,12 @@ interface PosState {
   addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string; toStore?: string; result?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
-  priceOf: (dishId: string, basePrice: number) => number // эффективная цена (оверрайд из офиса ?? базовая)
+  priceOf: (dishId: string, basePrice: number) => number // эффективная цена (категория ?? оверрайд ?? базовая)
   setDishPrice: (dishId: string, price: number) => void  // правка цены в офисе
+  setCategoryPrice: (catId: string, dishId: string, price: number) => void // цена по ценовой категории
+  setActivePriceCategory: (catId: string) => void        // выбрать ценовую категорию на кассе
+  addPriceCategory: (name: string) => void
+  removePriceCategory: (catId: string) => void
   setTechCard: (dishId: string, items: TechCardItem[]) => void // правка техкарты в офисе
 
   // сотрудники (карточки из офиса → вход на кассе)
@@ -424,6 +444,9 @@ export const usePos = create<PosState>((set, get) => ({
   ingredients: loadIngredients(),
   establishment: loadEstablishment(),
   priceOverrides: loadPriceOverrides(),
+  priceCategories: loadPriceCategories(),
+  categoryPrices: loadCategoryPrices(),
+  activePriceCategory: 'base',
   techCardOverrides: loadTechCards(),
   roleRights: loadRoleRights(),
   messages: messagesSeed.map((m) => ({ ...m })),
@@ -878,11 +901,35 @@ export const usePos = create<PosState>((set, get) => ({
     try { localStorage.setItem('iiko-establishment', JSON.stringify(next)) } catch { /* ignore */ }
     return { establishment: next }
   }),
-  priceOf: (dishId, basePrice) => get().priceOverrides[dishId] ?? basePrice,
+  priceOf: (dishId, basePrice) => {
+    const cat = get().activePriceCategory
+    if (cat && cat !== 'base') { const p = get().categoryPrices[cat]?.[dishId]; if (p != null) return p }
+    return get().priceOverrides[dishId] ?? basePrice
+  },
   setDishPrice: (dishId, price) => set((st) => {
     const next = { ...st.priceOverrides, [dishId]: price }
     try { localStorage.setItem('iiko-menu-prices', JSON.stringify(next)) } catch { /* ignore */ }
     return { priceOverrides: next }
+  }),
+  setCategoryPrice: (catId, dishId, price) => set((st) => {
+    const next = { ...st.categoryPrices, [catId]: { ...(st.categoryPrices[catId] ?? {}), [dishId]: price } }
+    persistCategoryPrices(next)
+    return { categoryPrices: next }
+  }),
+  setActivePriceCategory: (catId) => set({ activePriceCategory: catId }),
+  addPriceCategory: (name) => set((st) => {
+    const id = 'pc-' + (st.priceCategories.length + 1)
+    const list = [...st.priceCategories, { id, name }]
+    try { localStorage.setItem('iiko-price-categories', JSON.stringify(list)) } catch { /* ignore */ }
+    return { priceCategories: list }
+  }),
+  removePriceCategory: (catId) => set((st) => {
+    if (catId === 'base') return {}
+    const list = st.priceCategories.filter((c) => c.id !== catId)
+    const cp = { ...st.categoryPrices }; delete cp[catId]
+    try { localStorage.setItem('iiko-price-categories', JSON.stringify(list)) } catch { /* ignore */ }
+    persistCategoryPrices(cp)
+    return { priceCategories: list, categoryPrices: cp, activePriceCategory: st.activePriceCategory === catId ? 'base' : st.activePriceCategory }
   }),
   setTechCard: (dishId, items) => set((st) => {
     const next = { ...st.techCardOverrides, [dishId]: items }

@@ -35,6 +35,7 @@ export default function OrderScreen() {
   const [waiterPick, setWaiterPick] = useState(false)
   const [typePick, setTypePick] = useState(false)
   const [coursePick, setCoursePick] = useState(false)
+  const [catPick, setCatPick] = useState(false)
 
   useEffect(() => { if (!order) navigate('/halls') }, [order, navigate])
   // при переключении на другой заказ — сбросить активного гостя и выбор
@@ -150,6 +151,7 @@ export default function OrderScreen() {
             <Receipt size={15} /><span>{order.openedAt}</span>
             <span>· {tableLabel}</span>
             <span className="px-1.5 rounded bg-black/20 text-xs">{TYPE_LABEL[order.type]}</span>
+            {pos.activePriceCategory !== 'base' && <span className="px-1.5 rounded bg-amber-500/80 text-gray-900 text-xs">{pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name}</span>}
             <span className="flex items-center gap-1">· <Users size={15} /> {order.guests}</span>
             <span className="ml-auto">{order.waiter}</span>
           </div>
@@ -296,6 +298,7 @@ export default function OrderScreen() {
               { label: `Тип заказа: ${TYPE_LABEL[order.type]}`, on: () => setTypePick(true), disabled: false },
               ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { const n = window.prompt('Название барного счёта (имя гостя/карта):', order.tabName ?? ''); if (n != null) pos.setOrderTab(order.id, n.trim() || undefined) }, disabled: false }] : []),
               ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
+              { label: `Ценовая категория: ${pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name ?? 'Базовая'}`, on: () => setCatPick(true), disabled: false },
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
               { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
@@ -418,6 +421,23 @@ export default function OrderScreen() {
               ))}
             </div>
             <button onClick={() => setTypePick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* ценовая категория заказа (прайс-лист по категории гостя/карты) */}
+      {catPick && (
+        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setCatPick(false)}>
+          <div className="bg-white text-gray-800 rounded-lg p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-lg font-semibold mb-1">Ценовая категория</div>
+            <div className="text-sm text-gray-500 mb-3">Влияет на цену новых позиций заказа.</div>
+            <div className="flex flex-col gap-2">
+              {pos.priceCategories.map((c) => (
+                <button key={c.id} onClick={() => { pos.setActivePriceCategory(c.id); setCatPick(false); printToast(`Ценовая категория: ${c.name}`) }}
+                  className={`h-12 rounded-md ${pos.activePriceCategory === c.id ? 'bg-gray-200 text-gray-800' : 'bg-pos-blue text-white'}`}>{c.name}</button>
+              ))}
+            </div>
+            <button onClick={() => setCatPick(false)} className="mt-4 h-11 w-full rounded-md bg-gray-200">Отмена</button>
           </div>
         </div>
       )}

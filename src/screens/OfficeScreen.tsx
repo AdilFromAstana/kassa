@@ -76,6 +76,7 @@ const ROLE_SECTIONS: Record<string, Section[]> = {
 export default function OfficeScreen() {
   const navigate = useNavigate()
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
+    priceOverrides, priceCategories, categoryPrices, setCategoryPrice, addPriceCategory, removePriceCategory,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
     techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder, applyDuePriceOrders,
@@ -122,6 +123,8 @@ export default function OfficeScreen() {
   const [newCo, setNewCo] = useState({ name: '', direction: 'out' as 'in' | 'out', requireComment: false, limit: '' })
   const [newReason, setNewReason] = useState('')
   const [newOt, setNewOt] = useState({ name: '', mode: 'dinein' as OrderType, vat: 16 as VatRate })
+  const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
+  const [newCat, setNewCat] = useState('')
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
   const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
@@ -334,6 +337,22 @@ export default function OfficeScreen() {
             <div className="text-xs text-gray-500 mb-5">
               Цены меню. Изменённая цена сразу применяется на кассе (для новых позиций в заказе). Услуги без цены тоже здесь.
             </div>
+
+            {/* ценовые категории (прайс-листы по категории гостя/карты) */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <span className="text-gray-500 text-xs uppercase">Ценовая категория:</span>
+              {priceCategories.map((c) => (
+                <span key={c.id} className={`inline-flex items-center gap-1 h-8 px-3 rounded-full text-sm cursor-pointer ${menuCat === c.id ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}
+                  onClick={() => setMenuCat(c.id)}>
+                  {c.name}
+                  {c.id !== 'base' && <button onClick={(e) => { e.stopPropagation(); if (menuCat === c.id) setMenuCat('base'); removePriceCategory(c.id) }} className="opacity-60 hover:opacity-100">✕</button>}
+                </span>
+              ))}
+              <input value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="новая категория" className="h-8 w-40 rounded border border-gray-300 px-2 text-sm" />
+              <button onClick={() => { if (newCat.trim()) { addPriceCategory(newCat.trim()); setNewCat('') } }} className="h-8 px-3 rounded bg-gray-200 text-gray-700 text-sm">+ категория</button>
+              {menuCat !== 'base' && <span className="text-xs text-gray-400">Цены ниже — для «{priceCategories.find((c) => c.id === menuCat)?.name}»; пусто = базовая цена.</span>}
+            </div>
+
             {menuGroups.map((g) => {
               const items = dishesByGroup(g.id)
               if (!items.length) return null
@@ -342,16 +361,20 @@ export default function OfficeScreen() {
                   <div className="text-gray-500 text-xs uppercase mb-2">{g.name}</div>
                   <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
                     {items.map((d) => {
-                      const eff = priceOf(d.id, d.price)
-                      const overridden = eff !== d.price
+                      const baseEff = priceOverrides[d.id] ?? d.price
+                      const isBase = menuCat === 'base'
+                      const catVal = categoryPrices[menuCat]?.[d.id]
+                      const value = isBase ? baseEff : (catVal ?? '')
+                      const overridden = isBase ? baseEff !== d.price : catVal != null
                       return (
                         <div key={d.id} className="flex items-center gap-3 px-4 h-14 border-b border-gray-100 last:border-0">
                           <span className="font-mono text-xs text-gray-400 w-12">{d.code}</span>
                           <span className="flex-1">{d.name}</span>
-                          {overridden && <span className="text-xs text-gray-400 line-through">{formatTenge(d.price)}</span>}
+                          {!isBase && <span className="text-xs text-gray-400">базовая {formatTenge(baseEff)}</span>}
+                          {isBase && overridden && <span className="text-xs text-gray-400 line-through">{formatTenge(d.price)}</span>}
                           <div className="flex items-center gap-1">
-                            <input type="number" value={eff} min={0}
-                              onChange={(e) => setDishPrice(d.id, Math.max(0, parseFloat(e.target.value) || 0))}
+                            <input type="number" value={value} min={0} placeholder={isBase ? undefined : String(baseEff)}
+                              onChange={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); isBase ? setDishPrice(d.id, v) : setCategoryPrice(menuCat, d.id, v) }}
                               className="w-28 h-9 rounded border border-gray-300 px-2 text-right" />
                             <span className="text-gray-400 text-sm">₸</span>
                           </div>
