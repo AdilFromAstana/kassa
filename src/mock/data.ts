@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -69,6 +69,12 @@ export const discountSeed: Discount[] = [
 ]
 export const clubCardSeed: ClubCard[] = [
   { id: 'card-1', number: '7700 0001', owner: 'Алия Ж.', discountId: 'd-gold' },
+]
+
+// Мотивационные программы (раздел 06) — начисление премии за личные продажи.
+export const motivationSeed: MotivationProgram[] = [
+  { id: 'm-rev', name: 'Официанту % с выручки', scope: 'all', mode: 'percent', value: 5, active: true },
+  { id: 'm-dessert', name: 'Премия за десерты', scope: 'group', targetId: 'g-dessert', mode: 'percent', value: 3, active: true },
 ]
 
 // Стартовые банкеты/резервы (мок).

@@ -221,6 +221,28 @@ export interface SalaryPayout {
   by: string // кто провёл (офис)
 }
 
+// Мотивационная программа (Сотрудники → Мотивационные программы, topic-313).
+// Начисление за личные продажи сотрудника (waiter) по заказам, закрытым в смене.
+export interface MotivationProgram {
+  id: string
+  name: string
+  scope: 'all' | 'dish' | 'group' // все блюда / конкретное блюдо / категория
+  targetId?: string               // dishId или groupId (для scope dish/group)
+  mode: 'percent' | 'perUnit'     // % от выручки / фикс. ₸ за проданную единицу
+  value: number
+  minQty?: number                 // порог: продать не менее N (иначе премия 0)
+  active: boolean
+}
+
+// Удержание/штраф сотруднику (операция ведомости «Удержать», topic-313/06).
+export interface SalaryDeduction {
+  id: number
+  staffId: string
+  amount: number
+  reason: string
+  at: string
+}
+
 // Приказ об изменении цен (Прейскурант, iikoOffice). Активация → цены уезжают на кассу.
 export interface PriceOrderLine {
   dishId: string

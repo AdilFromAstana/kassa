@@ -3,10 +3,11 @@ import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard,
+  MotivationProgram, SalaryDeduction,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
-  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed } from '../mock/data'
+  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -131,6 +132,21 @@ function loadClubCards(): ClubCard[] {
 function persistClubCards(list: ClubCard[]) {
   try { localStorage.setItem('iiko-club-cards', JSON.stringify(list)) } catch { /* ignore */ }
 }
+// Мотивационные программы + удержания (раздел 06).
+function loadMotivation(): MotivationProgram[] {
+  try { const raw = localStorage.getItem('iiko-motivation'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return motivationSeed.map((m) => ({ ...m }))
+}
+function persistMotivation(list: MotivationProgram[]) {
+  try { localStorage.setItem('iiko-motivation', JSON.stringify(list)) } catch { /* ignore */ }
+}
+function loadDeductions(): SalaryDeduction[] {
+  try { const raw = localStorage.getItem('iiko-deductions'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return []
+}
+function persistDeductions(list: SalaryDeduction[]) {
+  try { localStorage.setItem('iiko-deductions', JSON.stringify(list)) } catch { /* ignore */ }
+}
 
 // ───────── мок-персист ОПЕРАТИВНОГО слоя (смена/заказы/банкеты/стоп-лист/документы/сообщения) ─────────
 // Без бэка: чтобы при перезагрузке страницы (F5) ничего не терялось. Конфиг офиса хранится отдельными ключами.
@@ -238,6 +254,9 @@ interface PosState {
   writeoffReasons: string[]   // причины списания (акт списания)
   discounts: Discount[]       // скидки/надбавки (Дисконтная система)
   clubCards: ClubCard[]       // клубные (дисконтные) карты
+  motivationPrograms: MotivationProgram[] // мотивационные программы (премии за продажи)
+  salaryDeductions: SalaryDeduction[]     // штрафы/удержания сотрудникам
+  deductionSeq: number
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -322,6 +341,12 @@ interface PosState {
   removeDiscount: (id: string) => void
   addClubCard: (c: Omit<ClubCard, 'id'>) => void
   removeClubCard: (id: string) => void
+  // мотивация + удержания (зарплата)
+  addMotivation: (m: Omit<MotivationProgram, 'id'>) => void
+  updateMotivation: (id: string, patch: Partial<MotivationProgram>) => void
+  removeMotivation: (id: string) => void
+  addDeduction: (staffId: string, amount: number, reason: string) => void
+  removeDeduction: (id: number) => void
 
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
@@ -381,6 +406,9 @@ export const usePos = create<PosState>((set, get) => ({
   writeoffReasons: loadWriteoffReasons(),
   discounts: loadDiscounts(),
   clubCards: loadClubCards(),
+  motivationPrograms: loadMotivation(),
+  salaryDeductions: loadDeductions(),
+  deductionSeq: loadDeductions().length,
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -900,6 +928,35 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.clubCards.filter((c) => c.id !== id)
     persistClubCards(list)
     return { clubCards: list }
+  }),
+
+  addMotivation: (m) => set((st) => {
+    const id = 'm-' + (st.motivationPrograms.length + 1)
+    const list = [...st.motivationPrograms, { ...m, id }]
+    persistMotivation(list)
+    return { motivationPrograms: list }
+  }),
+  updateMotivation: (id, patch) => set((st) => {
+    const list = st.motivationPrograms.map((m) => (m.id === id ? { ...m, ...patch } : m))
+    persistMotivation(list)
+    return { motivationPrograms: list }
+  }),
+  removeMotivation: (id) => set((st) => {
+    const list = st.motivationPrograms.filter((m) => m.id !== id)
+    persistMotivation(list)
+    return { motivationPrograms: list }
+  }),
+  addDeduction: (staffId, amount, reason) => set((st) => {
+    if (!(amount > 0)) return st
+    const item = { id: st.deductionSeq + 1, staffId, amount, reason: reason || 'Удержание', at: fullNow() }
+    const list = [item, ...st.salaryDeductions]
+    persistDeductions(list)
+    return { salaryDeductions: list, deductionSeq: st.deductionSeq + 1 }
+  }),
+  removeDeduction: (id) => set((st) => {
+    const list = st.salaryDeductions.filter((d) => d.id !== id)
+    persistDeductions(list)
+    return { salaryDeductions: list }
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {

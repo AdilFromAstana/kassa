@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { printToast } from '../lib/print'
-import { menuGroups, dishesByGroup, dishes } from '../mock/menu'
+import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { techCards, dishCost, dishMaxPortions } from '../mock/warehouse'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -64,7 +64,8 @@ export default function OfficeScreen() {
     salaryPayouts, paySalary,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
-    discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard } = usePos()
+    discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
+    motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
@@ -104,6 +105,8 @@ export default function OfficeScreen() {
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
   const [newCard, setNewCard] = useState({ number: '', owner: '', discountId: '' })
+  // мотивация (раздел payroll)
+  const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
   const [report, setReport] = useState<'sales' | 'stock' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
@@ -185,21 +188,44 @@ export default function OfficeScreen() {
   const grossProfit = +(noVat(revenue) - cogs).toFixed(2)
   const opProfit = +(grossProfit - payrollBase - payrollSO).toFixed(2)
 
-  // ───────── зарплата: начисление (оклад − налоги) + выплаты (аванс/расчёт) ─────────
-  const payrollOf = (staffId: string) => {
+  // премия по мотивационным программам — за личные продажи сотрудника (waiter) в закрытых заказах
+  const motivationOf = (staffName: string) => {
+    let bonus = 0
+    for (const prog of motivationPrograms.filter((m) => m.active)) {
+      let qty = 0, rev = 0
+      for (const o of closedOrders) {
+        if (o.waiter !== staffName) continue
+        for (const l of o.lines) {
+          const d = findDish(l.dishId)
+          const match = prog.scope === 'all' || (prog.scope === 'dish' && l.dishId === prog.targetId) || (prog.scope === 'group' && d?.groupId === prog.targetId)
+          if (match) { qty += l.qty; rev += lineTotal(l) }
+        }
+      }
+      if (prog.minQty && qty < prog.minQty) continue
+      bonus += prog.mode === 'percent' ? rev * prog.value / 100 : qty * prog.value
+    }
+    return Math.round(bonus)
+  }
+
+  // ───────── зарплата: начислено (оклад − налоги + премия − удержания) + выплаты (аванс/расчёт) ─────────
+  const payrollOf = (staffId: string, staffName: string) => {
     const okl = salary[staffId] ?? 250000
     const opv = Math.round(okl * 0.10), vosms = Math.round(okl * 0.02)
     const ipn = Math.round((okl - opv - vosms) * 0.10)
-    const net = okl - opv - vosms - ipn // к выплате на руки (начислено за вычетом налогов/отчислений)
+    const base = okl - opv - vosms - ipn // оклад за вычетом налогов
     const so = Math.round(okl * 0.035)
+    const premium = motivationOf(staffName)
+    const deduction = salaryDeductions.filter((d) => d.staffId === staffId).reduce((s, d) => s + d.amount, 0)
+    const net = +(base + premium - deduction).toFixed(2) // итого начислено к выплате
     const advance = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'advance').reduce((s, p) => s + p.amount, 0)
     const settle = salaryPayouts.filter((p) => p.staffId === staffId && p.kind === 'settlement').reduce((s, p) => s + p.amount, 0)
     const remaining = +(net - advance - settle).toFixed(2)
-    return { okl, opv, vosms, ipn, net, so, advance, settle, remaining }
+    return { okl, opv, vosms, ipn, base, premium, deduction, net, so, advance, settle, remaining }
   }
   // сводка по зарплате (для шапки раздела)
-  const payrollRows = staffList.map((p) => ({ p, ...payrollOf(p.id) }))
+  const payrollRows = staffList.map((p) => ({ p, ...payrollOf(p.id, p.name) }))
   const totNet = payrollRows.reduce((s, r) => s + r.net, 0)
+  const totPremium = payrollRows.reduce((s, r) => s + r.premium, 0)
   const totAdvance = payrollRows.reduce((s, r) => s + r.advance, 0)
   const totSettle = payrollRows.reduce((s, r) => s + r.settle, 0)
   const totRemaining = payrollRows.reduce((s, r) => s + r.remaining, 0)
@@ -983,28 +1009,31 @@ export default function OfficeScreen() {
               Выдача = <b>изъятие наличных из кассы</b> (тип «зарплата» → попадает в смену и отчёт 038).
             </div>
 
-            {/* сводка: сколько начислено / выдано авансов / расчёта / осталось */}
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            {/* сводка: начислено / премия / выдано авансов / расчёта / осталось */}
+            <div className="grid grid-cols-5 gap-3 mb-5">
               <OfficeStat label="К выплате (ФОТ)" value={formatTenge(totNet)} />
+              <OfficeStat label="Премии (мотивация)" value={formatTenge(totPremium)} />
               <OfficeStat label="Выдано авансов" value={formatTenge(totAdvance)} />
               <OfficeStat label="Выдано расчёта" value={formatTenge(totSettle)} />
               <OfficeStat label="Осталось выдать" value={formatTenge(totRemaining)} />
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-4">
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-6">
               <table className="w-full text-sm">
                 <thead><tr className="text-gray-500 text-left border-b border-gray-200">
-                  <th className="p-2">Сотрудник</th><th className="text-right">Оклад ₸</th><th className="text-right">Налоги</th><th className="text-right">К выплате</th>
-                  <th className="text-right">Аванс выдан</th><th className="text-right">Расчёт выдан</th><th className="text-right">Остаток</th><th className="p-2 text-center">Выдать</th>
+                  <th className="p-2">Сотрудник</th><th className="text-right">Оклад ₸</th><th className="text-right">Налоги</th><th className="text-right">Премия</th><th className="text-right">Удержано</th><th className="text-right">К выплате</th>
+                  <th className="text-right">Аванс</th><th className="text-right">Расчёт</th><th className="text-right">Остаток</th><th className="p-2 text-center">Действия</th>
                 </tr></thead>
                 <tbody>
-                  {payrollRows.map(({ p, okl, opv, vosms, ipn, net, advance, settle, remaining }) => {
+                  {payrollRows.map(({ p, okl, opv, vosms, ipn, premium, deduction, net, advance, settle, remaining }) => {
                     const advanceAmt = Math.min(remaining, Math.round(net * 0.4)) // аванс ≈ 40% от начисленного
                     return (
                       <tr key={p.id} className="border-b border-gray-100 last:border-0">
                         <td className="p-2">{p.name}<div className="text-xs text-gray-400">{p.positions[0]}</div></td>
                         <td className="text-right"><input type="number" value={okl} min={0} onChange={(e) => setSalary((s) => ({ ...s, [p.id]: Math.max(0, parseFloat(e.target.value) || 0) }))} className="w-24 h-8 rounded border border-gray-300 px-2 text-right" /></td>
                         <td className="text-right text-gray-500" title={`ОПВ ${opv} · ВОСМС ${vosms} · ИПН ${ipn}`}>{formatTenge(opv + vosms + ipn)}</td>
+                        <td className="text-right text-emerald-600">{premium > 0 ? '+' + formatTenge(premium) : <span className="text-gray-300">—</span>}</td>
+                        <td className="text-right text-red-500">{deduction > 0 ? '−' + formatTenge(deduction) : <span className="text-gray-300">—</span>}</td>
                         <td className="text-right font-semibold">{formatTenge(net)}</td>
                         <td className="text-right text-gray-600">{advance > 0 ? formatTenge(advance) : <span className="text-gray-300">—</span>}</td>
                         <td className="text-right text-gray-600">{settle > 0 ? formatTenge(settle) : <span className="text-gray-300">—</span>}</td>
@@ -1017,6 +1046,8 @@ export default function OfficeScreen() {
                             <button disabled={remaining <= 0}
                               onClick={() => { paySalary(p.id, 'settlement', remaining); printToast(`Расчёт ${p.name}: ${formatTenge(remaining)} — изъято из кассы`) }}
                               className={`h-7 px-2 rounded text-xs ${remaining > 0 ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Расчёт</button>
+                            <button onClick={() => { const a = parseFloat((window.prompt(`Удержание/штраф для ${p.name}, ₸:`, '') ?? '').replace(',', '.')); if (a > 0) { const r = window.prompt('Причина:', 'Штраф') ?? 'Штраф'; addDeduction(p.id, a, r) } }}
+                              className="h-7 px-2 rounded text-xs bg-rose-100 text-rose-700">Штраф</button>
                           </div>
                         </td>
                       </tr>
@@ -1024,6 +1055,49 @@ export default function OfficeScreen() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Мотивационные программы (премия за личные продажи) */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Мотивационные программы (премия за продажи в закрытых заказах)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Активна</th><th>Название</th><th>На что</th><th>Начисление</th><th className="text-right">Порог</th><th className="p-2"></th></tr></thead>
+                <tbody>
+                  {motivationPrograms.length === 0 ? <tr><td colSpan={6} className="p-3 text-gray-400">Программ нет.</td></tr> : motivationPrograms.map((m) => (
+                    <tr key={m.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2"><input type="checkbox" checked={m.active} onChange={(e) => updateMotivation(m.id, { active: e.target.checked })} /></td>
+                      <td>{m.name}</td>
+                      <td className="text-gray-500 text-xs">{m.scope === 'all' ? 'все блюда' : m.scope === 'dish' ? (findDish(m.targetId ?? '')?.name ?? 'блюдо') : (menuGroups.find((g) => g.id === m.targetId)?.name ?? 'категория')}</td>
+                      <td className="text-gray-600">{m.mode === 'percent' ? `${m.value}% с выручки` : `${formatTenge(m.value)} за ед.`}</td>
+                      <td className="text-right text-gray-500">{m.minQty ? `от ${m.minQty} шт` : '—'}</td>
+                      <td className="p-2 text-right"><button onClick={() => removeMotivation(m.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-end gap-2 mb-6 bg-white border border-gray-200 rounded p-3">
+              <input value={newMotiv.name} onChange={(e) => setNewMotiv({ ...newMotiv, name: e.target.value })} placeholder="Название" className="h-9 rounded border border-gray-300 px-2 flex-1 min-w-[150px]" />
+              <select value={newMotiv.scope} onChange={(e) => setNewMotiv({ ...newMotiv, scope: e.target.value as 'all' | 'dish' | 'group', targetId: '' })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="all">Все блюда</option><option value="group">Категория</option><option value="dish">Блюдо</option>
+              </select>
+              {newMotiv.scope !== 'all' && (
+                <select value={newMotiv.targetId} onChange={(e) => setNewMotiv({ ...newMotiv, targetId: e.target.value })} className="h-9 rounded border border-gray-300 px-2">
+                  <option value="">— выбрать —</option>
+                  {newMotiv.scope === 'group' ? menuGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>) : dishes.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              )}
+              <select value={newMotiv.mode} onChange={(e) => setNewMotiv({ ...newMotiv, mode: e.target.value as 'percent' | 'perUnit' })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="percent">% с выручки</option><option value="perUnit">₸ за единицу</option>
+              </select>
+              <input value={newMotiv.value} onChange={(e) => setNewMotiv({ ...newMotiv, value: e.target.value.replace(/[^\d.]/g, '') })} placeholder={newMotiv.mode === 'percent' ? '%' : '₸'} className="h-9 w-20 rounded border border-gray-300 px-2 text-right" />
+              <input value={newMotiv.minQty} onChange={(e) => setNewMotiv({ ...newMotiv, minQty: e.target.value.replace(/\D/g, '') })} placeholder="порог шт" className="h-9 w-24 rounded border border-gray-300 px-2 text-right" />
+              <button onClick={() => {
+                const v = parseFloat(newMotiv.value) || 0
+                if (!newMotiv.name.trim() || v <= 0 || (newMotiv.scope !== 'all' && !newMotiv.targetId)) return
+                addMotivation({ name: newMotiv.name.trim(), scope: newMotiv.scope, targetId: newMotiv.targetId || undefined, mode: newMotiv.mode, value: v, minQty: newMotiv.minQty ? Number(newMotiv.minQty) : undefined, active: true })
+                setNewMotiv({ name: '', scope: 'all', targetId: '', mode: 'percent', value: '', minQty: '' })
+              }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить</button>
             </div>
 
             {/* история выплат (ведомость) */}
@@ -1039,6 +1113,27 @@ export default function OfficeScreen() {
                         <td>{staffList.find((s) => s.id === pay.staffId)?.name ?? '—'}</td>
                         <td><span className={`text-xs px-2 py-0.5 rounded-full ${pay.kind === 'advance' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{pay.kind === 'advance' ? 'аванс' : 'расчёт'}</span></td>
                         <td className="text-right p-2">{formatTenge(pay.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* удержания / штрафы */}
+            <div className="text-gray-500 text-xs uppercase mt-6 mb-2">Удержания / штрафы</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+              {salaryDeductions.length === 0 ? <div className="p-3 text-gray-400 text-sm">Удержаний нет. Кнопка «Штраф» в строке сотрудника уменьшает «к выплате».</div> : (
+                <table className="w-full text-sm">
+                  <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Дата</th><th>Сотрудник</th><th>Причина</th><th className="text-right">Сумма</th><th className="p-2"></th></tr></thead>
+                  <tbody>
+                    {salaryDeductions.map((d) => (
+                      <tr key={d.id} className="border-b border-gray-100 last:border-0">
+                        <td className="p-2">{d.at.split(',')[0]}</td>
+                        <td>{staffList.find((s) => s.id === d.staffId)?.name ?? '—'}</td>
+                        <td className="text-gray-600">{d.reason}</td>
+                        <td className="text-right text-red-500">−{formatTenge(d.amount)}</td>
+                        <td className="p-2 text-right"><button onClick={() => removeDeduction(d.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
                       </tr>
                     ))}
                   </tbody>
