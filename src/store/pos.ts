@@ -93,6 +93,26 @@ function persistSalary(list: SalaryPayout[]) {
   try { localStorage.setItem('iiko-salary', JSON.stringify(list)) } catch { /* ignore */ }
 }
 
+// ───────── мок-персист ОПЕРАТИВНОГО слоя (смена/заказы/банкеты/стоп-лист/документы/сообщения) ─────────
+// Без бэка: чтобы при перезагрузке страницы (F5) ничего не терялось. Конфиг офиса хранится отдельными ключами.
+// user/personalShift НЕ сохраняем — вход на кассе остаётся «свежим» (как на реальном терминале), но данные смены целы.
+const RUNTIME_KEYS = [
+  'cashShift', 'cashShiftSeq', 'orders', 'closedOrders', 'currentOrderId', 'orderSeq', 'fiscalSeq',
+  'cashMovements', 'refunds', 'writeOffs', 'documents', 'docSeq', 'banquets', 'closedShifts', 'stopList',
+  'messages', 'movementSeq', 'refundSeq', 'banquetSeq',
+] as const
+function loadRuntime(): Record<string, unknown> {
+  try { const raw = localStorage.getItem('iiko-runtime'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistRuntime(state: Record<string, unknown>) {
+  try {
+    const snap: Record<string, unknown> = {}
+    for (const k of RUNTIME_KEYS) snap[k] = state[k]
+    localStorage.setItem('iiko-runtime', JSON.stringify(snap))
+  } catch { /* ignore */ }
+}
+
 // Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
 function loadRoleRights(): Record<string, string[]> {
   const base: Record<string, string[]> = {}
@@ -255,6 +275,16 @@ interface PosState {
   setDemoAuto: (on: boolean) => void   // авто-наполнение при запуске
 }
 
+// восстановленный оперативный слой (если был сохранён) — спредится поверх дефолтов ниже
+const RT = loadRuntime()
+// продолжить счётчик uid строк заказа, чтобы новые строки не столкнулись с восстановленными (l1, l2…)
+try {
+  const restored = [...((RT.orders as Order[]) ?? []), ...((RT.closedOrders as ClosedOrder[]) ?? [])]
+  let maxUid = 0
+  for (const o of restored) for (const l of o.lines) { const n = parseInt(String(l.uid).replace(/^l/, ''), 10); if (n > maxUid) maxUid = n }
+  if (maxUid >= uidSeq) uidSeq = maxUid + 1
+} catch { /* ignore */ }
+
 export const usePos = create<PosState>((set, get) => ({
   staffList: loadStaff(),
   user: null,
@@ -291,6 +321,9 @@ export const usePos = create<PosState>((set, get) => ({
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
   banquetSeq: initialBanquets.length,
+
+  // восстановленный оперативный слой переопределяет дефолты/демо (если был сохранён)
+  ...RT,
 
   login: (pin) => {
     const s = get().staffList.find((x) => x.pin === pin) ?? null
@@ -777,3 +810,6 @@ export const usePos = create<PosState>((set, get) => ({
     set({ demoAuto: on })
   },
 }))
+
+// Автосохранение оперативного слоя при любом изменении (мок-персист без бэка → ничего не теряется на reload).
+usePos.subscribe((s) => persistRuntime(s as unknown as Record<string, unknown>))

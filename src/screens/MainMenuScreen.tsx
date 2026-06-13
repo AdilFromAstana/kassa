@@ -96,10 +96,10 @@ export default function MainMenuScreen() {
         <div className="flex-1 border border-gray-300 max-w-2xl">
           <div className="flex">
             <div className="flex-1 text-white px-4 py-3 text-sm leading-relaxed" style={{ background: '#4a9b86' }}>
-              Фискальных регистраторов: 2<br />
+              Фискальных регистраторов: {est.frCount}<br />
               Кассовая смена<br />
-              открыта на: {cashShift ? 2 : 0}<br />
-              закрыта на: {cashShift ? 0 : 2}
+              открыта на: {cashShift ? est.frCount : 0}<br />
+              закрыта на: {cashShift ? 0 : est.frCount}
             </div>
             <button onClick={() => navigate('/fiscal/details')}
               className="w-48 bg-white text-gray-800 border-l border-gray-300 active:bg-gray-100">Подробнее…</button>
