@@ -41,16 +41,23 @@ export const tables: Table[] = [
 ]
 
 export const paymentTypes: PaymentType[] = [
-  { id: 'p-cash', name: 'Наличные', kind: 'cash' },
-  { id: 'p-card', name: 'Банковские карты', kind: 'card' },
-  { id: 'p-cashless', name: 'Безналичный расчёт', kind: 'cashless' },
-  { id: 'p-norev', name: 'Без выручки', kind: 'noRevenue' },
-  { id: 'p-bonus', name: 'Бонусная карта', kind: 'bonus' },
+  { id: 'p-cash', name: 'Наличные', kind: 'cash', active: true, code: 'CASH', openDrawer: true, exactSum: false, combinable: true },
+  { id: 'p-card', name: 'Банковские карты', kind: 'card', active: true, code: 'CARD', openDrawer: false, exactSum: true, combinable: true },
+  { id: 'p-cashless', name: 'Безналичный расчёт', kind: 'cashless', active: true, code: 'BANK', exactSum: true, combinable: true },
+  { id: 'p-norev', name: 'Без выручки', kind: 'noRevenue', active: true, code: 'NOREV', combinable: false },
+  { id: 'p-bonus', name: 'Бонусная карта', kind: 'bonus', active: false, code: 'BONUS', combinable: true },
 ]
 
 // Типы внесения/изъятия наличных (настраиваются в офисе, тут мок).
 export const cashInTypes = ['Внесение разменной монеты', 'Внесение на официанта', 'Прочее внесение']
 export const cashOutTypes = ['Изъятие (инкассация)', 'Изъятие под отчёт', 'Выдача аванса (зарплата)', 'Выплата зарплаты', 'Прочее изъятие']
+
+// Сиды для офисных справочников Розничных продаж (раздел 03): типы внесений/изъятий + причины списания.
+export const cashOpTypeSeed = [
+  ...cashInTypes.map((name, i) => ({ id: `ci-${i}`, name, direction: 'in' as const, manual: true })),
+  ...cashOutTypes.map((name, i) => ({ id: `co-${i}`, name, direction: 'out' as const, manual: true })),
+]
+export const writeoffReasonSeed = ['Бой / порча', 'Просрочка', 'Проработка', 'Дегустация', 'Прочее']
 
 // Стартовые банкеты/резервы (мок).
 export const initialBanquets: Banquet[] = [

@@ -11,16 +11,16 @@ import type { DocType, DocLine } from '../types'
 // «Документы» на кассе (iikoFront) — складские документы: акт списания/приготовления/переработки,
 // внутреннее перемещение, расходная накладная, инвентаризация. Приходной накладной на терминале нет (офис).
 const DOC_TYPES: DocType[] = ['Акт списания', 'Акт приготовления', 'Акт переработки', 'Внутреннее перемещение', 'Расходная накладная', 'Инвентаризация']
-const REASONS = ['Бой / порча', 'Просрочка', 'Проработка', 'Дегустация', 'Прочее']
 
 export default function DocumentsScreen() {
   const navigate = useNavigate()
-  const { ingredients, documents, createStoreDoc } = usePos()
+  const { ingredients, documents, createStoreDoc, writeoffReasons } = usePos()
+  const REASONS = writeoffReasons // причины списания из офиса (Розничные продажи)
   const [type, setType] = useState<DocType | null>(null)
   const [lines, setLines] = useState<DocLine[]>([])
   const [ingId, setIngId] = useState(ingredients[0]?.id ?? '')
   const [qty, setQty] = useState('')
-  const [reason, setReason] = useState(REASONS[0])
+  const [reason, setReason] = useState(writeoffReasons[0] ?? '')
   const [store, setStore] = useState(warehouses[0])
   const [toStore, setToStore] = useState(warehouses[1])
   const [resultId, setResultId] = useState(ingredients[0]?.id ?? '')

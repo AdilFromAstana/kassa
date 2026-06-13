@@ -1,23 +1,20 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Menu, Lock, ChevronLeft, Banknote, CreditCard, Ban, MoreHorizontal, UtensilsCrossed, ReceiptText, Send, X } from 'lucide-react'
+import { Menu, Lock, ChevronLeft, Banknote, CreditCard, Ban, MoreHorizontal, Gift, UtensilsCrossed, ReceiptText, Send, X } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
-import { paymentTypes, findTable } from '../mock/data'
+import { findTable } from '../mock/data'
 import { formatTenge, vatAmount } from '../lib/money'
 import { printToast } from '../lib/print'
-import type { PaymentSplit, ClosedOrder } from '../types'
+import type { PaymentSplit, ClosedOrder, PaymentKind } from '../types'
 
 // Экран оплаты заказа (ОПЛАТА ЗАКАЗА #N) — 1:1 с iikoFront:
 // слева состав по гостю + итоги, в центре «К оплате» + плитки оплат + внесено/внести/сдача,
 // справа вкладки типов оплат + дисплей + numpad с быстрыми кнопками + «Точная сумма».
-const TABS = [
-  { id: 'p-cash', label: 'НАЛИЧНЫЕ', Icon: Banknote },
-  { id: 'p-card', label: 'БАНКОВСКИЕ КАРТЫ', Icon: CreditCard },
-  { id: 'p-cashless', label: 'БЕЗНАЛ. РАСЧЕТ', Icon: Ban },
-  { id: 'p-norev', label: 'БЕЗ ВЫРУЧКИ', Icon: MoreHorizontal },
-]
+// Вкладки строятся из АКТИВНЫХ типов оплат офиса (Розничные продажи → Типы оплат).
 const QUICK = [[1, 5], [10, 50], [100, 500], [1000, 5000]]
-const nameOf = (id: string) => paymentTypes.find((p) => p.id === id)?.name ?? ''
+const ICON_BY_KIND: Record<PaymentKind, typeof Banknote> = {
+  cash: Banknote, card: CreditCard, cashless: Ban, noRevenue: MoreHorizontal, bonus: Gift,
+}
 const parseNum = (s: string) => parseFloat((s || '0').replace(',', '.')) || 0
 
 export default function PaymentScreen() {
@@ -29,8 +26,13 @@ export default function PaymentScreen() {
   const order = pos.currentOrder()
   const [receipt, setReceipt] = useState<ClosedOrder | null>(null)
 
-  const [lines, setLines] = useState<string[]>(['p-cash']) // типы оплат в работе
-  const [active, setActive] = useState('p-cash')
+  const paymentTypes = pos.paymentTypes
+  const tabs = paymentTypes.filter((p) => p.active)
+  const nameOf = (id: string) => paymentTypes.find((p) => p.id === id)?.name ?? ''
+  const firstId = tabs[0]?.id ?? 'p-cash'
+
+  const [lines, setLines] = useState<string[]>([firstId]) // типы оплат в работе
+  const [active, setActive] = useState(firstId)
   const [entry, setEntry] = useState<Record<string, string>>({})
 
   if (!order && !receipt) { navigate('/halls'); return null }
@@ -77,7 +79,13 @@ export default function PaymentScreen() {
   const fiscalSep = pos.establishment.fiscalBeforePay // 9.x: раздельная печать фискального чека перед оплатой
   const isFiscalized = order!.status === 'fiscalized'
 
-  const selectTab = (id: string) => { setActive(id); setLines((ls) => (ls.includes(id) ? ls : [...ls, id])) }
+  const selectTab = (id: string) => {
+    setActive(id)
+    setLines((ls) => (ls.includes(id) ? ls : [...ls, id]))
+    // «Устанавливать точную сумму» (атрибут типа оплаты) — авто-внос остатка к оплате
+    const pt = paymentTypes.find((p) => p.id === id)
+    if (pt?.exactSum) setEntry((e) => ({ ...e, [id]: String(+(amountOf(id) + toPayLeft).toFixed(2)) }))
+  }
   const setActiveEntry = (s: string) => setEntry((e) => ({ ...e, [active]: s }))
   const digit = (d: string) => setActiveEntry((entry[active] === '0' || !entry[active] ? '' : entry[active]) + d)
   const comma = () => setActiveEntry(entry[active]?.includes(',') ? entry[active] : (entry[active] || '0') + ',')
@@ -87,7 +95,7 @@ export default function PaymentScreen() {
   const removeLine = (id: string) => {
     setLines((ls) => ls.filter((x) => x !== id))
     setEntry((e) => { const c = { ...e }; delete c[id]; return c })
-    if (active === id) setActive('p-cash')
+    if (active === id) setActive(firstId)
   }
 
   const splitsNow = (): PaymentSplit[] => lines
@@ -97,8 +105,13 @@ export default function PaymentScreen() {
   const doPay = () => {
     const splits = splitsNow()
     if (splits.length === 0) return
+    const used = paymentTypes.filter((p) => splits.some((s) => s.paymentTypeId === p.id))
     const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid) : pos.pay(splits, paid)
-    if (closed) setReceipt(closed)
+    if (closed) {
+      if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
+      if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
+      setReceipt(closed)
+    }
   }
 
   // 9.x: печать фискального чека ДО оплаты — стол не закрывается, заказ переходит в стадию оплаты
@@ -183,13 +196,16 @@ export default function PaymentScreen() {
 
         {/* ПРАВО: вкладки типов + дисплей + numpad + быстрые суммы */}
         <div className="flex-1 flex flex-col bg-pos-bg">
-          <div className="grid grid-cols-4 shrink-0">
-            {TABS.map(({ id, label, Icon }) => (
-              <button key={id} onClick={() => selectTab(id)}
-                className={`h-20 flex flex-col items-center justify-center gap-1 border-r border-black/20 ${active === id ? 'bg-pos-accent text-gray-900' : 'bg-[#6d7479] text-white'}`}>
-                <Icon size={24} /><span className="text-xs leading-tight text-center px-1">{label}</span>
-              </button>
-            ))}
+          <div className="grid shrink-0" style={{ gridTemplateColumns: `repeat(${Math.max(1, tabs.length)}, minmax(0,1fr))` }}>
+            {tabs.map((pt) => {
+              const Icon = ICON_BY_KIND[pt.kind] ?? MoreHorizontal
+              return (
+                <button key={pt.id} onClick={() => selectTab(pt.id)}
+                  className={`h-20 flex flex-col items-center justify-center gap-1 border-r border-black/20 ${active === pt.id ? 'bg-pos-accent text-gray-900' : 'bg-[#6d7479] text-white'}`}>
+                  <Icon size={24} /><span className="text-xs leading-tight text-center px-1 uppercase">{pt.name}</span>
+                </button>
+              )
+            })}
           </div>
           <div className="text-center text-pos-accent text-lg pt-3">{nameOf(active).toUpperCase()}</div>
           <div className="text-center text-5xl font-light py-4">{formatTenge(amountOf(active))}</div>

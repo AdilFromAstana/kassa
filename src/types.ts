@@ -104,6 +104,23 @@ export interface PaymentType {
   id: string
   name: string
   kind: PaymentKind
+  active?: boolean       // показывать на кассе (Типы оплат, офис)
+  code?: string          // код для внешнего API (VISA и т.п.)
+  openDrawer?: boolean   // открывать денежный ящик
+  exactSum?: boolean     // устанавливать точную сумму заказа
+  printReceipt?: boolean // печатать товарный чек
+  combinable?: boolean   // можно комбинировать с другими типами оплаты
+  discountPct?: number   // авто-скидка при этом типе оплаты, %
+}
+
+// Тип внесения/изъятия наличных (Розничные продажи → Типы внесений/изъятий, topic-102).
+export interface CashOpType {
+  id: string
+  name: string
+  direction: 'in' | 'out'   // внесение / изъятие
+  requireComment?: boolean   // требовать ввода комментария в iikoFront
+  limit?: number             // лимит суммы (0/undefined — без лимита)
+  manual: boolean            // доступен для ручного ввода в iikoFront
 }
 
 export interface PaymentSplit {

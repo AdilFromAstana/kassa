@@ -2,10 +2,11 @@ import { create } from 'zustand'
 import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
-  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout,
+  Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType,
 } from '../types'
 import { findDish } from '../mock/menu'
-import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed } from '../mock/data'
+import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
+  paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
@@ -91,6 +92,29 @@ function loadSalary(): SalaryPayout[] {
 }
 function persistSalary(list: SalaryPayout[]) {
   try { localStorage.setItem('iiko-salary', JSON.stringify(list)) } catch { /* ignore */ }
+}
+
+// Справочники Розничных продаж (раздел 03) — настраиваются в офисе, читаются кассой.
+function loadPaymentTypes(): PaymentType[] {
+  try { const raw = localStorage.getItem('iiko-payment-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return paymentTypesSeed.map((p) => ({ ...p }))
+}
+function persistPaymentTypes(list: PaymentType[]) {
+  try { localStorage.setItem('iiko-payment-types', JSON.stringify(list)) } catch { /* ignore */ }
+}
+function loadCashOpTypes(): CashOpType[] {
+  try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return cashOpTypeSeed.map((c) => ({ ...c }))
+}
+function persistCashOpTypes(list: CashOpType[]) {
+  try { localStorage.setItem('iiko-cashop-types', JSON.stringify(list)) } catch { /* ignore */ }
+}
+function loadWriteoffReasons(): string[] {
+  try { const raw = localStorage.getItem('iiko-writeoff-reasons'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return [...writeoffReasonSeed]
+}
+function persistWriteoffReasons(list: string[]) {
+  try { localStorage.setItem('iiko-writeoff-reasons', JSON.stringify(list)) } catch { /* ignore */ }
 }
 
 // ───────── мок-персист ОПЕРАТИВНОГО слоя (смена/заказы/банкеты/стоп-лист/документы/сообщения) ─────────
@@ -194,6 +218,9 @@ interface PosState {
   priceOrderSeq: number
   salaryPayouts: SalaryPayout[] // выплаты сотрудникам (аванс/расчёт)
   salaryPayoutSeq: number
+  paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
+  cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
+  writeoffReasons: string[]   // причины списания (акт списания)
   demoAuto: boolean // авто-наполнение демо-заказами при запуске
   movementSeq: number
   refundSeq: number
@@ -264,6 +291,15 @@ interface PosState {
   // зарплата: выдача аванса/расчёта → изъятие наличных из кассы (связь офис↔касса)
   paySalary: (staffId: string, kind: 'advance' | 'settlement', amount: number) => void
 
+  // справочники Розничных продаж (офис → касса)
+  addPaymentType: (p: Omit<PaymentType, 'id'>) => void
+  updatePaymentType: (id: string, patch: Partial<PaymentType>) => void
+  removePaymentType: (id: string) => void
+  addCashOpType: (c: Omit<CashOpType, 'id'>) => void
+  removeCashOpType: (id: string) => void
+  addWriteoffReason: (name: string) => void
+  removeWriteoffReason: (name: string) => void
+
   // склад
   receiveStock: (ingredientId: string, qty: number) => void // приход (приходная накладная, мок)
   setIngredientStock: (ingredientId: string, qty: number) => void // инвентаризация (выставить факт)
@@ -317,6 +353,9 @@ export const usePos = create<PosState>((set, get) => ({
   priceOrderSeq: loadPriceOrders().length,
   salaryPayouts: loadSalary(),
   salaryPayoutSeq: loadSalary().length,
+  paymentTypes: loadPaymentTypes(),
+  cashOpTypes: loadCashOpTypes(),
+  writeoffReasons: loadWriteoffReasons(),
   demoAuto: DEMO_AUTO,
   movementSeq: DEMO_INIT?.movementSeq ?? 0,
   refundSeq: 0,
@@ -767,6 +806,47 @@ export const usePos = create<PosState>((set, get) => ({
       }
     })
   },
+
+  // справочники Розничных продаж (офис) → касса читает из стора
+  addPaymentType: (p) => set((st) => {
+    const id = 'p-' + (p.code?.toLowerCase() || 'custom') + '-' + (st.paymentTypes.length + 1)
+    const list = [...st.paymentTypes, { ...p, id }]
+    persistPaymentTypes(list)
+    return { paymentTypes: list }
+  }),
+  updatePaymentType: (id, patch) => set((st) => {
+    const list = st.paymentTypes.map((p) => (p.id === id ? { ...p, ...patch } : p))
+    persistPaymentTypes(list)
+    return { paymentTypes: list }
+  }),
+  removePaymentType: (id) => set((st) => {
+    const list = st.paymentTypes.filter((p) => p.id !== id)
+    persistPaymentTypes(list)
+    return { paymentTypes: list }
+  }),
+  addCashOpType: (c) => set((st) => {
+    const id = (c.direction === 'in' ? 'ci-' : 'co-') + (st.cashOpTypes.length + 1)
+    const list = [...st.cashOpTypes, { ...c, id }]
+    persistCashOpTypes(list)
+    return { cashOpTypes: list }
+  }),
+  removeCashOpType: (id) => set((st) => {
+    const list = st.cashOpTypes.filter((c) => c.id !== id)
+    persistCashOpTypes(list)
+    return { cashOpTypes: list }
+  }),
+  addWriteoffReason: (name) => set((st) => {
+    const n = name.trim()
+    if (!n || st.writeoffReasons.includes(n)) return st
+    const list = [...st.writeoffReasons, n]
+    persistWriteoffReasons(list)
+    return { writeoffReasons: list }
+  }),
+  removeWriteoffReason: (name) => set((st) => {
+    const list = st.writeoffReasons.filter((r) => r !== name)
+    persistWriteoffReasons(list)
+    return { writeoffReasons: list }
+  }),
 
   receiveStock: (ingredientId, qty) => set((st) => {
     const ingredients = st.ingredients.map((i) =>

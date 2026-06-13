@@ -2,7 +2,6 @@ import { useState } from 'react'
 import BackButton from '../components/BackButton'
 import { useNavigate } from 'react-router-dom'
 import { usePos, lineTotal } from '../store/pos'
-import { paymentTypes } from '../mock/data'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
 import TopBar from '../components/TopBar'
@@ -11,7 +10,7 @@ import RefundModal from '../components/RefundModal'
 // Закрытые заказы + возвраты (частичный/полный) и изменение типа оплаты (FRONT_03 §2.6).
 export default function ClosedOrdersScreen() {
   const navigate = useNavigate()
-  const { closedOrders, refunds, refundOrder, changePaymentType, cashShift } = usePos()
+  const { closedOrders, refunds, refundOrder, changePaymentType, cashShift, paymentTypes } = usePos()
   const [selNo, setSelNo] = useState<string | null>(closedOrders[0]?.fiscalDocNo ?? null)
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [changing, setChanging] = useState(false)

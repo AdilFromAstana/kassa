@@ -9,7 +9,7 @@ import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 import { todayISO, formatRu, fromISO, toISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
-import type { Establishment, PriceOrderLine } from '../types'
+import type { Establishment, PriceOrderLine, PaymentKind } from '../types'
 
 // iikoOffice (мок бэк-офиса) — здесь редактируется конфиг заведения и меню/цены, которые «уезжают»
 // на кассу (Front). Общий стор + localStorage: изменения применяются на кассе сразу.
@@ -27,11 +27,12 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
+type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'prikazy', label: 'Прейскурант (приказы)' },
+  { id: 'retail', label: 'Розничные продажи' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
@@ -40,14 +41,15 @@ const NAV: { id: Section; label: string }[] = [
 ]
 const SECTION_TITLE: Record<Section, string> = {
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
+  retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
 }
 
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'stock', 'accounting', 'payroll', 'reports'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'staff', 'stock', 'accounting', 'payroll', 'reports'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'stock', 'accounting', 'payroll', 'reports'],
   'Бухгалтер': ['accounting', 'payroll', 'reports', 'stock'],
 }
 
@@ -57,7 +59,9 @@ export default function OfficeScreen() {
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
     techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder,
-    salaryPayouts, paySalary } = usePos()
+    salaryPayouts, paySalary,
+    paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
+    cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   const [salary, setSalary] = useState<Record<string, number>>({})
@@ -90,6 +94,10 @@ export default function OfficeScreen() {
     const o = createPriceOrder(poLines, poDate, poNote.trim() || 'Изменение цен')
     if (o) { printToast(`Приказ ${o.no} создан (черновик)`); setPoLines([]); setPoNote('') }
   }
+  // розничные продажи (раздел retail)
+  const [newPt, setNewPt] = useState({ name: '', kind: 'cashless' as PaymentKind, code: '' })
+  const [newCo, setNewCo] = useState({ name: '', direction: 'out' as 'in' | 'out', requireComment: false, limit: '' })
+  const [newReason, setNewReason] = useState('')
   // отчёты (раздел reports)
   const [report, setReport] = useState<'sales' | 'stock' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
@@ -376,6 +384,94 @@ export default function OfficeScreen() {
             </div>
 
             {poCal && <CalendarModal value={fromISO(poDate)} onOk={(d) => { setPoDate(toISO(d)); setPoCal(false) }} onCancel={() => setPoCal(false)} />}
+          </div>
+        ) : section === 'retail' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-5">
+              Справочники кассовых операций (Розничные продажи, iikoOffice). Касса (Front) читает их сразу:
+              типы оплат → экран оплаты, типы внесений/изъятий → «Внести/Изъять деньги», причины списания → «Документы».
+            </div>
+
+            {/* Типы оплат */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Типы оплат (вкладки на экране оплаты)</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                  <th className="p-2">Активен</th><th>Название</th><th>Вид</th><th>Код</th>
+                  <th className="text-center">Ящик</th><th className="text-center">Точная сумма</th><th className="text-center">Тов. чек</th><th className="text-center">Комбинир.</th><th className="p-2"></th>
+                </tr></thead>
+                <tbody>
+                  {paymentTypes.map((p) => (
+                    <tr key={p.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2"><input type="checkbox" checked={!!p.active} onChange={(e) => updatePaymentType(p.id, { active: e.target.checked })} /></td>
+                      <td>{p.name}</td>
+                      <td className="text-gray-500 text-xs">{p.kind}</td>
+                      <td className="font-mono text-xs text-gray-400">{p.code ?? '—'}</td>
+                      <td className="text-center"><input type="checkbox" checked={!!p.openDrawer} onChange={(e) => updatePaymentType(p.id, { openDrawer: e.target.checked })} /></td>
+                      <td className="text-center"><input type="checkbox" checked={!!p.exactSum} onChange={(e) => updatePaymentType(p.id, { exactSum: e.target.checked })} /></td>
+                      <td className="text-center"><input type="checkbox" checked={!!p.printReceipt} onChange={(e) => updatePaymentType(p.id, { printReceipt: e.target.checked })} /></td>
+                      <td className="text-center"><input type="checkbox" checked={!!p.combinable} onChange={(e) => updatePaymentType(p.id, { combinable: e.target.checked })} /></td>
+                      <td className="p-2 text-right">{p.id.startsWith('p-custom') || !['p-cash', 'p-card', 'p-cashless', 'p-norev', 'p-bonus'].includes(p.id)
+                        ? <button onClick={() => removePaymentType(p.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
+                        : <span className="text-gray-300 text-xs">системный</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-end gap-2 mb-6">
+              <input value={newPt.name} onChange={(e) => setNewPt({ ...newPt, name: e.target.value })} placeholder="Название (напр. Сертификат)" className="h-9 rounded border border-gray-300 px-2 flex-1" />
+              <select value={newPt.kind} onChange={(e) => setNewPt({ ...newPt, kind: e.target.value as PaymentKind })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="cashless">Безналичный</option><option value="noRevenue">Без выручки</option><option value="bonus">Бонусы</option><option value="card">Карта</option>
+              </select>
+              <input value={newPt.code} onChange={(e) => setNewPt({ ...newPt, code: e.target.value.toUpperCase() })} placeholder="КОД" className="h-9 w-28 rounded border border-gray-300 px-2 font-mono" />
+              <button onClick={() => { if (newPt.name.trim()) { addPaymentType({ name: newPt.name.trim(), kind: newPt.kind, code: newPt.code, active: true, combinable: true }); setNewPt({ name: '', kind: 'cashless', code: '' }) } }}
+                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить тип</button>
+            </div>
+
+            {/* Типы внесений / изъятий */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Типы внесений / изъятий наличных</div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
+              <table className="w-full text-sm">
+                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Направление</th><th>Название</th><th className="text-center">Коммент. обязателен</th><th className="text-right">Лимит</th><th className="p-2"></th></tr></thead>
+                <tbody>
+                  {cashOpTypes.map((c) => (
+                    <tr key={c.id} className="border-b border-gray-100 last:border-0">
+                      <td className="p-2"><span className={`text-xs px-2 py-0.5 rounded-full ${c.direction === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>{c.direction === 'in' ? 'внесение' : 'изъятие'}</span></td>
+                      <td>{c.name}</td>
+                      <td className="text-center">{c.requireComment ? '✓' : '—'}</td>
+                      <td className="text-right text-gray-500">{c.limit ? formatTenge(c.limit) : '—'}</td>
+                      <td className="p-2 text-right"><button onClick={() => removeCashOpType(c.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-end gap-2 mb-6">
+              <select value={newCo.direction} onChange={(e) => setNewCo({ ...newCo, direction: e.target.value as 'in' | 'out' })} className="h-9 rounded border border-gray-300 px-2">
+                <option value="in">Внесение</option><option value="out">Изъятие</option>
+              </select>
+              <input value={newCo.name} onChange={(e) => setNewCo({ ...newCo, name: e.target.value })} placeholder="Название операции" className="h-9 rounded border border-gray-300 px-2 flex-1" />
+              <input value={newCo.limit} onChange={(e) => setNewCo({ ...newCo, limit: e.target.value.replace(/\D/g, '') })} placeholder="лимит ₸" className="h-9 w-28 rounded border border-gray-300 px-2 text-right" />
+              <label className="flex items-center gap-1 text-xs text-gray-500"><input type="checkbox" checked={newCo.requireComment} onChange={(e) => setNewCo({ ...newCo, requireComment: e.target.checked })} />коммент.</label>
+              <button onClick={() => { if (newCo.name.trim()) { addCashOpType({ name: newCo.name.trim(), direction: newCo.direction, requireComment: newCo.requireComment, limit: newCo.limit ? Number(newCo.limit) : undefined, manual: true }); setNewCo({ name: '', direction: 'out', requireComment: false, limit: '' }) } }}
+                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить</button>
+            </div>
+
+            {/* Причины списания */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Причины списания (акт списания на кассе)</div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {writeoffReasons.map((r) => (
+                <span key={r} className="inline-flex items-center gap-2 h-9 px-3 rounded bg-white border border-gray-200 text-sm">
+                  {r}<button onClick={() => removeWriteoffReason(r)} className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                </span>
+              ))}
+              {writeoffReasons.length === 0 && <span className="text-gray-400 text-sm">Причин нет.</span>}
+            </div>
+            <div className="flex items-end gap-2">
+              <input value={newReason} onChange={(e) => setNewReason(e.target.value)} placeholder="Новая причина" className="h-9 rounded border border-gray-300 px-2 w-64" />
+              <button onClick={() => { if (newReason.trim()) { addWriteoffReason(newReason); setNewReason('') } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm inline-flex items-center gap-1"><Plus size={14} />Добавить</button>
+            </div>
           </div>
         ) : section === 'staff' ? (
           <div className="p-6 max-w-4xl">
