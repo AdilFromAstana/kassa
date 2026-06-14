@@ -167,9 +167,10 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
+  const [unsoldMax, setUnsoldMax] = useState('5') // порог «плохо раскупается» (topic-621): количество ≤ N
   const addPLine = () => {
     const ing = ingredients.find((i) => i.id === pIng); const q = parseFloat(pQty.replace(',', '.')); const pr = parseFloat(pPrice.replace(',', '.'))
     if (!ing || !(q > 0) || !(pr > 0)) return
@@ -214,6 +215,9 @@ export default function OfficeScreen() {
       downloadExcel('iiko-средний-чек', [['Дата', 'Чеков', 'Гостей', 'Продажи', 'Средний чек', 'Средний заказ гостя', 'Ср. гостей на заказ'],
         ...avgByDay.map((d) => [d.day, d.checks, d.guests, xlsNum(d.sales), xlsNum(avgCheck(d.sales, d.checks)), xlsNum(avgGuestOrder(d.sales, d.guests)), xlsNum(avgGuestsPer(d.sales, d.checks, d.guests))]),
         ['Итого', avgTot.checks, avgTot.guests, xlsNum(avgTot.sales), xlsNum(avgCheck(avgTot.sales, avgTot.checks)), xlsNum(avgGuestOrder(avgTot.sales, avgTot.guests)), xlsNum(avgGuestsPer(avgTot.sales, avgTot.checks, avgTot.guests))]])
+    } else if (report === 'unsold') {
+      downloadExcel('iiko-непродаваемые-блюда', [['Название', 'Группа', 'Продано'],
+        ...unsoldRows.map((x) => [x.d.name, x.group, xlsNum(x.qty, 2)])])
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -259,6 +263,15 @@ export default function OfficeScreen() {
   const avgCheck = (s: number, c: number) => (c ? s / c : 0)
   const avgGuestOrder = (s: number, g: number) => (g ? s / g : 0)
   const avgGuestsPer = (s: number, c: number, g: number) => { const ac = avgCheck(s, c), ag = avgGuestOrder(s, g); return ag ? ac / ag : 0 }
+
+  // Непродаваемые блюда (topic-621): блюда «в продаже на период» с количеством продаж ≤ порога.
+  // В моке все блюда меню считаются в продаже; «количество» = продано за период (closedOrders).
+  const soldQtyByDish = closedOrders.reduce((acc, o) => { for (const l of o.lines) acc[l.dishId] = (acc[l.dishId] ?? 0) + l.qty; return acc }, {} as Record<string, number>)
+  const unsoldThreshold = Math.max(0, parseInt(unsoldMax, 10) || 0)
+  const unsoldRows = dishes
+    .map((d) => ({ d, qty: +(soldQtyByDish[d.id] ?? 0).toFixed(2), group: menuGroups.find((g) => g.id === d.groupId)?.name ?? '—' }))
+    .filter((x) => x.qty <= unsoldThreshold)
+    .sort((a, b) => a.qty - b.qty || a.d.name.localeCompare(b.d.name))
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1015,13 +1028,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1109,6 +1122,36 @@ export default function OfficeScreen() {
                   </table>
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Средний чек = Продажи / Чеки · Средний заказ гостя = Продажи / Гости · Ср. гостей на заказ = Средний чек / Средний заказ гостя.</div>
+              </div>
+            )}
+
+            {/* 1c. Непродаваемые блюда (topic-621) */}
+            {report === 'unsold' && (
+              <div>
+                <div className="flex items-center gap-2 mb-3 text-sm">
+                  <span className="text-gray-500">Показывать блюда с продажами не более</span>
+                  <input value={unsoldMax} onChange={(e) => setUnsoldMax(e.target.value.replace(/\D/g, ''))} inputMode="numeric"
+                    className="h-8 w-16 rounded border border-gray-300 px-2 text-right" />
+                  <span className="text-gray-500">шт за период</span>
+                  <span className="ml-auto text-gray-500">Найдено: <b className="text-gray-800">{unsoldRows.length}</b></span>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Название</th><th>Группа</th><th className="text-right p-2">Продано (шт)</th>
+                    </tr></thead>
+                    <tbody>
+                      {unsoldRows.length === 0 ? <tr><td colSpan={3} className="p-3 text-gray-400">Нет блюд по критерию (все продаются лучше порога).</td></tr> : unsoldRows.map((x) => (
+                        <tr key={x.d.id} className="border-b border-gray-100 last:border-0">
+                          <td className="p-2">{x.d.name}</td>
+                          <td className="text-gray-500">{x.group}</td>
+                          <td className={`text-right p-2 ${x.qty === 0 ? 'text-rose-600 font-medium' : 'text-gray-700'}`}>{x.qty === 0 ? '0 (не продавалось)' : x.qty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Блюда «в продаже на период» с количеством продаж ≤ порога. Красным — не продавались ни разу. Детализация по официантам/ТП — бэклог.</div>
               </div>
             )}
 
