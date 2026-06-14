@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -79,6 +79,29 @@ export const clubCardSeed: ClubCard[] = [
 ]
 
 // iikoCard — бонусная программа лояльности (модуль 15) + карты гостей с балансом бонусов.
+// ───────── Доставка (модуль 14, iikoDelivery) ─────────
+export const deliverySettingsSeed: DeliverySettings = {
+  durationMin: 60, minSum: 3000, feeAmount: 800,
+  cities: ['Астана', 'Алматы', 'Шымкент'],
+  streets: ['пр. Кабанбай батыра', 'ул. Сарайшык', 'пр. Туран', 'ул. Достык', 'ул. Кенесары'],
+  districts: ['Есиль', 'Алматы р-н', 'Сарыарка', 'Байконыр'],
+}
+export const couriersSeed: Courier[] = [
+  { id: 'cr-1', name: 'Ермек Т.', onShift: true },
+  { id: 'cr-2', name: 'Нурлан А.', onShift: true },
+  { id: 'cr-3', name: 'Асхат Б.', onShift: false },
+]
+export const deliveryCustomersSeed: DeliveryCustomer[] = [
+  { id: 'dc-1', name: 'Данияр К.', phone: '+7 701 111 22 33', street: 'пр. Кабанбай батыра', house: '11', apt: '45', district: 'Есиль', adSource: 'Сайт', highRisk: false, comment: '' },
+  { id: 'dc-2', name: 'Самал Е.', phone: '+7 705 222 33 44', street: 'ул. Сарайшык', house: '7', apt: '12', district: 'Есиль', adSource: 'Instagram', highRisk: false, comment: 'код подъезда 1234' },
+  { id: 'dc-3', name: 'Руслан М.', phone: '+7 707 999 88 77', street: 'пр. Туран', house: '24', apt: '88', district: 'Сарыарка', adSource: 'Листовка', highRisk: true, comment: 'отказы от заказов' },
+]
+export const deliveryOrdersSeed: DeliveryOrder[] = [
+  { id: 1, no: 'Д-1001', type: 'courier', customerName: 'Данияр К.', phone: '+7 701 111 22 33', address: 'пр. Кабанбай батыра 11, кв. 45 · Есиль', adSource: 'Сайт', items: [{ name: 'Бесбармак астау', qty: 1, price: 70000 }, { name: 'Кола 0.5', qty: 2, price: 800 }], goods: 71600, fee: 800, status: 'new', createdAt: 'Сегодня 18:20' },
+  { id: 2, no: 'Д-1002', type: 'courier', customerName: 'Самал Е.', phone: '+7 705 222 33 44', address: 'ул. Сарайшык 7, кв. 12 · Есиль', adSource: 'Instagram', items: [{ name: 'Лагман', qty: 2, price: 5000 }], goods: 10000, fee: 800, status: 'cooking', createdAt: 'Сегодня 18:05' },
+  { id: 3, no: 'Д-1003', type: 'pickup', customerName: 'Руслан М.', phone: '+7 707 999 88 77', address: 'Самовывоз', adSource: 'Листовка', items: [{ name: 'Манты (5 шт)', qty: 1, price: 4500 }], goods: 4500, fee: 0, status: 'onway', courierId: 'cr-1', createdAt: 'Сегодня 17:40' },
+]
+
 // ───────── Администрирование (модуль 12): лицензии, печатные формы, устройства ввода ─────────
 export const licenseClientIdSeed = 'KZ-7700-MUMTAZ'
 export const licensesSeed: License[] = [

@@ -5,6 +5,7 @@ import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } f
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance } from '../mock/data'
+import OfficeDelivery from './OfficeDelivery'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -28,7 +29,7 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'admin'
+type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'admin'
 const NAV: { id: Section; label: string }[] = [
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
@@ -36,6 +37,7 @@ const NAV: { id: Section; label: string }[] = [
   { id: 'retail', label: 'Розничные продажи' },
   { id: 'discount', label: 'Дисконтная система' },
   { id: 'loyalty', label: 'iikoCard (лояльность)' },
+  { id: 'delivery', label: 'Доставка (iikoDelivery)' },
   { id: 'staff', label: 'Сотрудники и права' },
   { id: 'stock', label: 'Номенклатура и техкарты' },
   { id: 'accounting', label: 'Бухгалтерия (KZ)' },
@@ -50,6 +52,7 @@ const SECTION_TITLE: Record<Section, string> = {
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
   loyalty: 'iikoCard — бонусная программа лояльности и карты гостей',
+  delivery: 'Доставка (iikoDelivery) — заказы, клиенты, курьеры, справочники, отчёты',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
   finance: 'Финансы — кассовая книга и ДДС (движение денежных средств)',
   journal: 'Журнал событий — монитор операций',
@@ -77,8 +80,8 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'admin'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'admin'],
+  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
   'Бухгалтер': ['accounting', 'payroll', 'finance', 'reports', 'stock'],
 }
 
@@ -1507,6 +1510,8 @@ export default function OfficeScreen() {
               )
             })()}
           </div>
+        ) : section === 'delivery' ? (
+          <OfficeDelivery />
         ) : section === 'admin' ? (
           <div className="p-6 max-w-4xl">
             <div className="text-xs text-gray-500 mb-4">Администрирование (модуль 12) — системные настройки: лицензии, шаблоны печатных форм, устройства ввода, обслуживание БД.</div>

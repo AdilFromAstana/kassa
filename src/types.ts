@@ -328,6 +328,47 @@ export interface Invoice {
   kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
 }
 
+// ───────── Доставка (модуль 14, iikoDelivery) ─────────
+export interface DeliveryCustomer {
+  id: string
+  name: string
+  phone: string
+  street: string
+  house: string
+  apt: string
+  district: string
+  adSource: string   // источник рекламы
+  highRisk: boolean  // «высокий риск» (проблемный клиент)
+  comment: string
+}
+export interface Courier { id: string; name: string; onShift: boolean }
+export interface DeliveryItem { name: string; qty: number; price: number }
+export type DeliveryStatus = 'new' | 'confirmed' | 'cooking' | 'onway' | 'delivered' | 'closed' | 'cancelled'
+export interface DeliveryOrder {
+  id: number
+  no: string                 // номер доставки
+  type: 'courier' | 'pickup' // курьером / самовывоз
+  customerName: string
+  phone: string
+  address: string
+  adSource: string
+  items: DeliveryItem[]
+  goods: number              // стоимость блюд
+  fee: number                // стоимость доставки
+  status: DeliveryStatus
+  courierId?: string
+  createdAt: string
+  cancelReason?: string
+}
+export interface DeliverySettings {
+  durationMin: number  // продолжительность доставки, мин
+  minSum: number       // минимальная сумма заказа, ₸
+  feeAmount: number    // стоимость доставки (услуга), ₸
+  cities: string[]
+  streets: string[]
+  districts: string[]
+}
+
 // ───────── Администрирование (модуль 12) ─────────
 // Лицензия iiko (модуль/количество/срок), Шаблон печатной формы, Устройство ввода.
 export interface License { id: string; module: string; count: number; from: string; to: string }

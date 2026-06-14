@@ -4,11 +4,13 @@ import type {
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
   MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice,
+  DeliveryCustomer, Courier, DeliveryOrder, DeliveryStatus, DeliverySettings, DeliveryItem,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
-  loyaltyProgramSeed, loyaltyCardsSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed } from '../mock/data'
+  loyaltyProgramSeed, loyaltyCardsSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed,
+  deliverySettingsSeed, couriersSeed, deliveryCustomersSeed, deliveryOrdersSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 import { todayISO } from '../lib/date'
 
@@ -335,6 +337,11 @@ interface PosState {
   licenses: License[]            // установленные лицензии (модуль/количество/срок)
   printTemplates: PrintTemplate[] // шаблоны печатных форм (стандартные/пользовательские)
   inputDevices: InputDevice[]    // устройства ввода (сканер/считыватель/клавиатура)
+  deliverySettings: DeliverySettings // настройки доставки (продолжительность/мин.сумма/стоимость/справочники)
+  couriers: Courier[]            // курьеры доставки
+  deliveryCustomers: DeliveryCustomer[] // клиенты доставки
+  deliveryOrders: DeliveryOrder[]   // заказы доставки (жизненный цикл)
+  deliverySeq: number
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -391,6 +398,18 @@ interface PosState {
   removePrintTemplate: (id: string) => void
   addInputDevice: (d: Omit<InputDevice, 'id'>) => void
   removeInputDevice: (id: string) => void
+  // доставка (модуль 14)
+  setDeliverySettings: (patch: Partial<DeliverySettings>) => void
+  addCourier: (name: string) => void
+  removeCourier: (id: string) => void
+  toggleCourierShift: (id: string) => void
+  addDeliveryCustomer: (c: Omit<DeliveryCustomer, 'id'>) => void
+  removeDeliveryCustomer: (id: string) => void
+  toggleHighRisk: (id: string) => void
+  createDeliveryOrder: (o: { type: 'courier' | 'pickup'; customerName: string; phone: string; address: string; adSource: string; items: DeliveryItem[] }) => DeliveryOrder
+  setDeliveryStatus: (id: number, status: DeliveryStatus) => void
+  assignCourier: (id: number, courierId: string) => void
+  cancelDelivery: (id: number, reason: string) => void
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -540,6 +559,11 @@ export const usePos = create<PosState>((set, get) => ({
   licenses: loadAdmin('iiko-licenses', licensesSeed.map((l) => ({ ...l }))),
   printTemplates: loadAdmin('iiko-print-templates', printTemplatesSeed.map((t) => ({ ...t }))),
   inputDevices: loadAdmin('iiko-input-devices', inputDevicesSeed.map((d) => ({ ...d }))),
+  deliverySettings: loadAdmin('iiko-delivery-settings', { ...deliverySettingsSeed }),
+  couriers: loadAdmin('iiko-couriers', couriersSeed.map((c) => ({ ...c }))),
+  deliveryCustomers: loadAdmin('iiko-delivery-customers', deliveryCustomersSeed.map((c) => ({ ...c }))),
+  deliveryOrders: loadAdmin('iiko-delivery-orders', deliveryOrdersSeed.map((o) => ({ ...o }))),
+  deliverySeq: loadAdmin<DeliveryOrder[]>('iiko-delivery-orders', deliveryOrdersSeed).reduce((m, o) => Math.max(m, o.id), 1003),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -774,6 +798,69 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.inputDevices.filter((d) => d.id !== id)
     persistAdmin('iiko-input-devices', list)
     return { inputDevices: list }
+  }),
+  // ───────── Доставка (модуль 14, iikoDelivery) ─────────
+  setDeliverySettings: (patch) => set((st) => {
+    const s = { ...st.deliverySettings, ...patch }
+    persistAdmin('iiko-delivery-settings', s)
+    return { deliverySettings: s }
+  }),
+  addCourier: (name) => set((st) => {
+    const list = [...st.couriers, { id: 'cr-' + (st.couriers.length + 1), name, onShift: false }]
+    persistAdmin('iiko-couriers', list)
+    return { couriers: list }
+  }),
+  removeCourier: (id) => set((st) => {
+    const list = st.couriers.filter((c) => c.id !== id)
+    persistAdmin('iiko-couriers', list)
+    return { couriers: list }
+  }),
+  toggleCourierShift: (id) => set((st) => {
+    const list = st.couriers.map((c) => (c.id === id ? { ...c, onShift: !c.onShift } : c))
+    persistAdmin('iiko-couriers', list)
+    return { couriers: list }
+  }),
+  addDeliveryCustomer: (c) => set((st) => {
+    const list = [...st.deliveryCustomers, { ...c, id: 'dc-' + (st.deliveryCustomers.length + 1) }]
+    persistAdmin('iiko-delivery-customers', list)
+    return { deliveryCustomers: list }
+  }),
+  removeDeliveryCustomer: (id) => set((st) => {
+    const list = st.deliveryCustomers.filter((c) => c.id !== id)
+    persistAdmin('iiko-delivery-customers', list)
+    return { deliveryCustomers: list }
+  }),
+  toggleHighRisk: (id) => set((st) => {
+    const list = st.deliveryCustomers.map((c) => (c.id === id ? { ...c, highRisk: !c.highRisk } : c))
+    persistAdmin('iiko-delivery-customers', list)
+    return { deliveryCustomers: list }
+  }),
+  createDeliveryOrder: (o) => {
+    const id = get().deliverySeq + 1
+    const goods = +o.items.reduce((s, it) => s + it.qty * it.price, 0).toFixed(2)
+    const fee = o.type === 'courier' ? get().deliverySettings.feeAmount : 0
+    const order: DeliveryOrder = { id, no: 'Д-' + id, ...o, goods, fee, status: 'new', createdAt: fullNow() }
+    set((st) => {
+      const list = [order, ...st.deliveryOrders]
+      persistAdmin('iiko-delivery-orders', list)
+      return { deliveryOrders: list, deliverySeq: id }
+    })
+    return order
+  },
+  setDeliveryStatus: (id, status) => set((st) => {
+    const list = st.deliveryOrders.map((o) => (o.id === id ? { ...o, status } : o))
+    persistAdmin('iiko-delivery-orders', list)
+    return { deliveryOrders: list }
+  }),
+  assignCourier: (id, courierId) => set((st) => {
+    const list = st.deliveryOrders.map((o) => (o.id === id ? { ...o, courierId, status: 'onway' as const } : o))
+    persistAdmin('iiko-delivery-orders', list)
+    return { deliveryOrders: list }
+  }),
+  cancelDelivery: (id, reason) => set((st) => {
+    const list = st.deliveryOrders.map((o) => (o.id === id ? { ...o, status: 'cancelled' as const, cancelReason: reason } : o))
+    persistAdmin('iiko-delivery-orders', list)
+    return { deliveryOrders: list }
   }),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
