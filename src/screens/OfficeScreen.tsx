@@ -167,7 +167,8 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [revCut, setRevCut] = useState<'day' | 'category' | 'waiter' | 'payment' | 'hour'>('payment') // Отчёты по выручке (topic-110): разрез
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [purchMode, setPurchMode] = useState<'bySupplier' | 'byStore'>('bySupplier') // Отчёт о закупках (topic-607): по поставщикам / по складам
   const [whereIng, setWhereIng] = useState(ingredients[0]?.id ?? '') // Вхождение товара в блюдо (topic-210): выбранный ингредиент
@@ -213,6 +214,10 @@ export default function OfficeScreen() {
     } else if (report === 'sales') {
       downloadExcel('iiko-продажи-по-дням', [['Дата', 'Чеков', 'Выручка', 'Средний чек'],
         ...salesByDay.map((d) => [d.day, d.checks, xlsNum(d.rev), xlsNum(d.rev / d.checks)])])
+    } else if (report === 'revenue') {
+      downloadExcel(`iiko-выручка-${revActive.id}`, [[revActive.col, 'Заказов', 'Гостей', 'Выручка'],
+        ...revActive.rows.map((r) => [r.key, r.orders, r.guests, xlsNum(r.sum)]),
+        ['Итого', revTot.orders, revTot.guests, xlsNum(revTot.sum)]])
     } else if (report === 'avg') {
       downloadExcel('iiko-средний-чек', [['Дата', 'Чеков', 'Гостей', 'Продажи', 'Средний чек', 'Средний заказ гостя', 'Ср. гостей на заказ'],
         ...avgByDay.map((d) => [d.day, d.checks, d.guests, xlsNum(d.sales), xlsNum(avgCheck(d.sales, d.checks)), xlsNum(avgGuestOrder(d.sales, d.guests)), xlsNum(avgGuestsPer(d.sales, d.checks, d.guests))]),
@@ -324,6 +329,35 @@ export default function OfficeScreen() {
     })
   }).sort((a, b) => a.waiter.localeCompare(b.waiter) || a.name.localeCompare(b.name))
   const dishDetailTot = dishDetailRows.reduce((t, r) => ({ qty: t.qty + r.qty, full: t.full + r.full, disc: t.disc + r.disc, itog: t.itog + r.itog, vat: t.vat + r.vat }), { qty: 0, full: 0, disc: 0, itog: 0, vat: 0 })
+
+  // Отчёты по выручке (topic-110): семейство разрезов (по дням/категориям/официантам/типам оплат/часам).
+  // Каждый разрез: <измерение> · Заказов · Гостей · Выручка. Источник — closedOrders.
+  type RevRow = { key: string; sum: number; orders: number; guests: number }
+  const primaryPay = (o: typeof closedOrders[number]) => [...o.payments].sort((a, b) => b.amount - a.amount)[0]?.name ?? '—'
+  const hourOf = (o: typeof closedOrders[number]) => { const hh = (o.paidAt.split(',')[1] ?? '').trim().slice(0, 2); return hh ? `${hh}:00` : '—' }
+  const groupNameOf = (dishId: string) => menuGroups.find((g) => g.id === findDish(dishId)?.groupId)?.name ?? '—'
+  const accSimple = (keyFn: (o: typeof closedOrders[number]) => string): RevRow[] => Object.values(closedOrders.reduce((acc, o) => {
+    const k = keyFn(o); const a = (acc[k] ??= { key: k, sum: 0, orders: 0, guests: 0 }); a.sum += o.total; a.orders++; a.guests += o.guests; return acc
+  }, {} as Record<string, RevRow>))
+  const revByDay = accSimple((o) => dayKey(o.paidAt)).sort((a, b) => a.key.localeCompare(b.key))
+  const revByWaiter = accSimple((o) => o.waiter || '—').sort((a, b) => b.sum - a.sum)
+  const revByPayment = accSimple(primaryPay).sort((a, b) => b.sum - a.sum)
+  const revByHour = accSimple(hourOf).sort((a, b) => a.key.localeCompare(b.key))
+  const revByCategory = Object.values(closedOrders.reduce((acc, o) => {
+    const groups: Record<string, number> = {}
+    for (const l of o.lines) { const g = groupNameOf(l.dishId); groups[g] = (groups[g] ?? 0) + lineTotal(l) }
+    for (const [g, s] of Object.entries(groups)) { const a = (acc[g] ??= { key: g, sum: 0, orders: 0, guests: 0 }); a.sum += s; a.orders++; a.guests += o.guests }
+    return acc
+  }, {} as Record<string, RevRow>)).sort((a, b) => b.sum - a.sum)
+  const REV_CUTS: { id: typeof revCut; label: string; col: string; rows: RevRow[] }[] = [
+    { id: 'payment', label: 'По типам оплат', col: 'Тип оплаты', rows: revByPayment },
+    { id: 'day', label: 'По дням', col: 'Дата', rows: revByDay },
+    { id: 'category', label: 'По категориям', col: 'Категория', rows: revByCategory },
+    { id: 'waiter', label: 'По официантам', col: 'Официант', rows: revByWaiter },
+    { id: 'hour', label: 'Почасовая', col: 'Час', rows: revByHour },
+  ]
+  const revActive = REV_CUTS.find((c) => c.id === revCut) ?? REV_CUTS[0]
+  const revTot = revActive.rows.reduce((t, r) => ({ orders: t.orders + r.orders, guests: t.guests + r.guests, sum: t.sum + r.sum }), { orders: 0, guests: 0, sum: 0 })
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1080,13 +1114,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'revenue' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'revenue' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1174,6 +1208,37 @@ export default function OfficeScreen() {
                   </table>
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Средний чек = Продажи / Чеки · Средний заказ гостя = Продажи / Гости · Ср. гостей на заказ = Средний чек / Средний заказ гостя.</div>
+              </div>
+            )}
+
+            {/* 1g. Отчёты по выручке (topic-110) — разрезы выручки */}
+            {report === 'revenue' && (
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  {REV_CUTS.map((c) => (
+                    <button key={c.id} onClick={() => setRevCut(c.id)} className={`h-8 px-3 rounded text-sm ${revCut === c.id ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{c.label}</button>
+                  ))}
+                  <span className="ml-auto text-sm text-gray-500">Итого выручка: <b className="text-gray-800">{formatTenge(revTot.sum)}</b></span>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">{revActive.col}</th><th className="text-right">Заказов</th><th className="text-right">Гостей</th><th className="text-right p-2">Выручка</th>
+                    </tr></thead>
+                    <tbody>
+                      {revActive.rows.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Нет продаж.</td></tr> : revActive.rows.map((r) => (
+                        <tr key={r.key} className="border-b border-gray-100 last:border-0">
+                          <td className="p-2">{r.key}</td>
+                          <td className="text-right">{r.orders}</td>
+                          <td className="text-right text-gray-500">{r.guests}</td>
+                          <td className="text-right p-2">{formatTenge(r.sum)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {revActive.rows.length > 0 && <tfoot><tr className="border-t border-gray-200 font-semibold"><td className="p-2">Итого</td><td className="text-right">{revTot.orders}</td><td className="text-right">{revTot.guests}</td><td className="text-right p-2">{formatTenge(revTot.sum)}</td></tr></tfoot>}
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Разрезы выручки из закрытых чеков. «По категориям» — заказ учитывается в каждой категории своих блюд; «По типам оплат» — по основному типу оплаты чека. Выручка станций по кассам — 1 ФР (мок).</div>
               </div>
             )}
 
