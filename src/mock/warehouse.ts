@@ -158,7 +158,7 @@ export function dishMaxPortions(dishId: string, ings: Ingredient[], over?: Recor
 // Дельта расхода ингредиентов по строкам (блюдо по техкарте + модификаторы,
 // норма модификатора × его количество × количество блюда).
 // over — оверрайды техкарт из офиса (dishId → закладка). Если нет — берётся базовая техкарта.
-function consumptionDelta(lines: OrderLine[], over?: Record<string, TechCardItem[]>): Record<string, number> {
+export function consumptionDelta(lines: OrderLine[], over?: Record<string, TechCardItem[]>): Record<string, number> {
   const delta: Record<string, number> = {}
   const add = (id: string, g: number) => { delta[id] = +((delta[id] ?? 0) + g).toFixed(4) }
   for (const l of lines) {
