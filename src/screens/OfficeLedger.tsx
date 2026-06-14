@@ -5,6 +5,7 @@ import { chartOfAccountsSeed as CHART, openingBalancesSeed as OPENING } from '..
 import { dishCost } from '../mock/warehouse'
 import { formatTenge, vatAmount } from '../lib/money'
 import { todayISO } from '../lib/date'
+import Tabs from '../components/Tabs'
 import type { JournalEntry } from '../types'
 
 // Бухгалтерия (модуль 07): двойная запись — план счетов РК, авто-проводки от операций кассы/закупок/ЗП,
@@ -81,12 +82,9 @@ export default function OfficeLedger() {
 
   return (
     <div>
-      <div className="flex gap-1 mb-4 border-b border-gray-200">
-        {([['accounts', 'План счетов'], ['journal', 'Журнал проводок'], ['osv', 'ОСВ'], ['balance', 'Баланс']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-4 h-9 text-sm -mb-px border-b-2 ${tab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-        ))}
-      </div>
+      <Tabs compact active={tab} onChange={setTab} items={[
+        { id: 'accounts', label: 'План счетов' }, { id: 'journal', label: 'Журнал проводок' }, { id: 'osv', label: 'ОСВ' }, { id: 'balance', label: 'Баланс' },
+      ]} />
 
       {tab === 'accounts' && (
         <div className="bg-white border border-gray-200 rounded-md overflow-auto max-w-2xl">

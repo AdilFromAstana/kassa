@@ -26,9 +26,13 @@ export default function FiscalCommandsScreen() {
   closedOrders.forEach((o) => o.payments.forEach((p) => { const t = (byType[p.name] ??= { sum: 0, count: 0 }); t.sum += p.amount; t.count += 1 }))
   const cashIn = cashMovements.filter((m) => m.kind === 'in').reduce((s, m) => s + m.amount, 0)
   const cashOut = cashMovements.filter((m) => m.kind === 'out').reduce((s, m) => s + m.amount, 0)
-  const refundsSum = +refunds.reduce((s, r) => s + r.amount, 0).toFixed(2)
+  // разменный фонд уже учтён движением-внесением в cashIn → показываем «Внесения» без него, фонд отдельной строкой (без двойного счёта)
+  const fund = cashShift?.openingCash ?? 0
+  const otherCashIn = +(cashIn - fund).toFixed(2)
+  // для остатка в ящике учитываем только возвраты наличными (карточные ящика не касаются)
+  const cashRefunds = +refunds.filter((r) => r.method !== 'card').reduce((s, r) => s + r.amount, 0).toFixed(2)
   const cashPaid = closedOrders.reduce((s, o) => s + o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((x, p) => x + p.amount, 0), 0)
-  const cashInDrawer = +((cashShift?.openingCash ?? 0) + cashIn + cashPaid - cashOut - refundsSum).toFixed(2)
+  const cashInDrawer = +(cashIn + cashPaid - cashOut - cashRefunds).toFixed(2)
 
   const [showJournal, setShowJournal] = useState(false)
   const unsentOfd = 0 // непереданных в ОФД (мок: онлайн-режим). Реальное значение — с драйвера Webkassa.
@@ -141,10 +145,11 @@ export default function FiscalCommandsScreen() {
               {Object.keys(byType).length === 0 ? <div className="text-gray-400">— нет —</div>
                 : Object.entries(byType).map(([k, v]) => <Row key={k} k={`${k} (${v.count})`} v={formatTenge(v.sum)} />)}
               <div className="border-t border-dashed my-2" /><div className="text-gray-500">Касса:</div>
-              <Row k="Разменный фонд" v={formatTenge(cashShift?.openingCash ?? 0)} />
-              <Row k="Внесения" v={formatTenge(cashIn)} />
+              <Row k="Разменный фонд" v={formatTenge(fund)} />
+              <Row k="Внесения" v={formatTenge(otherCashIn)} />
+              <Row k="Продажи наличными" v={formatTenge(cashPaid)} />
               <Row k="Изъятия" v={'− ' + formatTenge(cashOut)} />
-              <Row k="Возвраты" v={'− ' + formatTenge(refundsSum)} />
+              <Row k="Возвраты наличными" v={'− ' + formatTenge(cashRefunds)} />
               <Row k="Наличных в ящике" v={formatTenge(cashInDrawer)} b />
               <div className="text-center text-xs text-gray-400 mt-3 border-t pt-2">
                 {report === 'x' ? 'Промежуточный отчёт — смена НЕ закрывается.' : 'Сменный отчёт с гашением — смена будет закрыта.'}

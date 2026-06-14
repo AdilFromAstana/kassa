@@ -4,15 +4,22 @@ import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
-import { attendance } from '../mock/data'
+import { attendance, warehouses } from '../mock/data'
 import OfficeDelivery from './OfficeDelivery'
 import OfficeCorp from './OfficeCorp'
 import OfficeLedger from './OfficeLedger'
+import OfficeOlap from './OfficeOlap'
+import OfficeLoyalty from './OfficeLoyalty'
+import OfficeJournal from './OfficeJournal'
+import OfficeAdmin from './OfficeAdmin'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
-import { formatTenge } from '../lib/money'
+import { formatTenge, vatBreakdown } from '../lib/money'
+import { downloadExcel, xlsNum } from '../lib/export'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
+import InputModal from '../components/InputModal'
+import Tabs from '../components/Tabs'
 import type { Establishment, PriceOrderLine, PaymentKind, OrderType, VatRate } from '../types'
 
 // iikoOffice (мок бэк-офиса) — здесь редактируется конфиг заведения и меню/цены, которые «уезжают»
@@ -55,7 +62,7 @@ const SECTION_TITLE: Record<Section, string> = {
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
-  loyalty: 'iikoCard — бонусная программа лояльности и карты гостей',
+  loyalty: 'iikoCard — лояльность: бонусы (конструктор акций), депозит-кошелёк, сертификаты, карты гостей',
   delivery: 'Доставка (iikoDelivery) — заказы, клиенты, курьеры, справочники, отчёты',
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
   finance: 'Финансы — кассовая книга и ДДС (движение денежных средств)',
@@ -102,8 +109,6 @@ export default function OfficeScreen() {
     shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
-    loyaltyProgram, loyaltyCards, setLoyaltyProgram, addLoyaltyCard, removeLoyaltyCard,
-    licenseClientId, licenses, printTemplates, inputDevices, setLicenseClientId, addLicense, removeLicense, addPrintTemplate, removePrintTemplate, addInputDevice, removeInputDevice,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
@@ -118,8 +123,13 @@ export default function OfficeScreen() {
   // бухгалтерия (KZ)
   const [cName, setCName] = useState(''); const [cBin, setCBin] = useState('')
   const [supplierId, setSupplierId] = useState('')
+  // тач-модалки (вместо window.prompt): приход на склад / удержание-штраф
+  const [recvItem, setRecvItem] = useState<{ id: string; name: string; unit: string } | null>(null)
+  const [deductStaff, setDeductStaff] = useState<{ id: string; name: string } | null>(null)
   const [pLines, setPLines] = useState<{ ingredientId: string; name: string; qty: number; price: number }[]>([])
   const [pIng, setPIng] = useState(ingredients[0]?.id ?? ''); const [pQty, setPQty] = useState(''); const [pPrice, setPPrice] = useState('')
+  // шапка приходной накладной (№/дата/ЭСФ/склад-получатель)
+  const [pStore, setPStore] = useState(warehouses[0]); const [pDate, setPDate] = useState(todayISO()); const [pNo, setPNo] = useState(''); const [pEsf, setPEsf] = useState('')
   const [outBuyer, setOutBuyer] = useState(''); const [outAmount, setOutAmount] = useState('')
   // карточка сотрудника (раздел staff)
   const [editStaff, setEditStaff] = useState<{ id: string | null; name: string; pin: string; positions: string[] } | null>(null)
@@ -147,14 +157,9 @@ export default function OfficeScreen() {
   const [newOt, setNewOt] = useState({ name: '', mode: 'dinein' as OrderType, vat: 16 as VatRate })
   const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
   const [newCat, setNewCat] = useState('')
-  const [journalCat, setJournalCat] = useState<string>('all') // фильтр журнала событий
   const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'ledger'>('book')
-  const [newLc, setNewLc] = useState({ number: '', owner: '', phone: '' })
-  const [adminTab, setAdminTab] = useState<'license' | 'print' | 'devices' | 'db'>('license')
   const [rightSearch, setRightSearch] = useState('')
   const [rightScope, setRightScope] = useState<'all' | 'front' | 'office' | 'delivery'>('all')
-  const [newTpl, setNewTpl] = useState({ name: '', type: 'Чек' })
-  const [newDev, setNewDev] = useState({ name: '', type: 'Сканер штрихкода', group: 'pos' as 'keyboard' | 'pos' })
   const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
   // дисконтная система (раздел discount)
   const [newDisc, setNewDisc] = useState({ name: '', kind: 'discount' as 'discount' | 'surcharge', percent: '', manual: true, byCard: false, minSum: '', fromTime: '', toTime: '' })
@@ -162,11 +167,9 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'stock' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
-  const [olapDim, setOlapDim] = useState<'day' | 'dish' | 'waiter' | 'payment'>('dish')
-  const [olapMeasure, setOlapMeasure] = useState<'revenue' | 'checks' | 'qty'>('revenue')
   const addPLine = () => {
     const ing = ingredients.find((i) => i.id === pIng); const q = parseFloat(pQty.replace(',', '.')); const pr = parseFloat(pPrice.replace(',', '.'))
     if (!ing || !(q > 0) || !(pr > 0)) return
@@ -174,13 +177,17 @@ export default function OfficeScreen() {
   }
   const provesti = () => {
     if (!supplierId || pLines.length === 0) return
-    const inv = addPurchase(supplierId, pLines)
-    if (inv) { printToast(`Приходная ${inv.no} проведена · ЭСФ ${inv.esfNo}`); setPLines([]) }
+    const inv = addPurchase(supplierId, pLines, { store: pStore, date: pDate, no: pNo, esfNo: pEsf })
+    if (inv) { printToast(`Приходная ${inv.no} проведена · ЭСФ ${inv.esfNo} · склад ${inv.store ?? '—'}`); setPLines([]); setPNo(''); setPEsf('') }
   }
 
   // сводка для раздела «Отчёты»
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
-  const vatKz = +(revenue - revenue / 1.16).toFixed(2) // ҚҚС 16% в т.ч. с продаж
+  // мультиставка ҚҚС: разбивка по реальным ставкам позиций (16%/0%), как в отчётах iiko (011/041)
+  const vatRowsKz = vatBreakdown(closedOrders.flatMap((o) => o.lines).map((l) => ({ gross: lineTotal(l), rate: l.vat })))
+  const vatKz = +vatRowsKz.reduce((s, r) => s + r.vat, 0).toFixed(2) // ҚҚС в т.ч. с продаж (все ставки)
+  const netRevenue = +vatRowsKz.reduce((s, r) => s + r.net, 0).toFixed(2) // оборот без ҚҚС
+  const multiRateKz = vatRowsKz.length > 1
   const incoming = invoices.filter((i) => i.kind !== 'out')
   const outgoing = invoices.filter((i) => i.kind === 'out')
   const exportTo1C = () => {
@@ -190,20 +197,42 @@ export default function OfficeScreen() {
   }
   const avg = closedOrders.length ? revenue / closedOrders.length : 0
   const refSum = refunds.reduce((s, r) => s + r.amount, 0)
+  // Excel-экспорт текущего отчёта (как «Excel…» в iikoOffice)
+  const exportExcel = () => {
+    if (report === 'sales' && salesMode === 'byDish') {
+      downloadExcel('iiko-продажи-по-блюдам', [
+        ['Блюдо', 'Кол-во', 'Выручка', 'ҚҚС %', 'Без НДС', 'Себест.', 'Валовая', 'Наценка %'],
+        ...salesByDish.map((d) => {
+          const g = +(noVat(d.rev, d.vat) - d.cost).toFixed(2)
+          return [d.name, xlsNum(d.qty), xlsNum(d.rev), d.vat, xlsNum(noVat(d.rev, d.vat)), xlsNum(d.cost), xlsNum(g), d.cost > 0 ? Math.round(g / d.cost * 100) : 0]
+        }),
+      ])
+    } else if (report === 'sales') {
+      downloadExcel('iiko-продажи-по-дням', [['Дата', 'Чеков', 'Выручка', 'Средний чек'],
+        ...salesByDay.map((d) => [d.day, d.checks, xlsNum(d.rev), xlsNum(d.rev / d.checks)])])
+    } else if (report === 'stock') {
+      downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
+        ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
+    } else if (report === 'vat') {
+      downloadExcel('iiko-ҚҚС-по-ставкам', [['Ставка ҚҚС', 'Оборот (с ҚҚС)', 'Без НДС', 'Сумма ҚҚС'],
+        ...vatRowsKz.map((r) => [`${r.rate}%`, xlsNum(r.gross), xlsNum(r.net), xlsNum(r.vat)]),
+        ['Итого', xlsNum(vatRowsKz.reduce((s, r) => s + r.gross, 0)), xlsNum(netRevenue), xlsNum(vatKz)]])
+    }
+  }
 
   // ───────── данные для отчётов (раздел reports) ─────────
-  const noVat = (x: number) => +(x / 1.16).toFixed(2)
+  const noVat = (x: number, rate = 16) => +(x / (1 + rate / 100)).toFixed(2) // оборот без ҚҚС по ставке позиции
   const dayKey = (s: string) => s.split(',')[0] ?? s // fullNow() = "dd.mm.yyyy, hh:mm"
   const lineCost = (dishId: string, qty: number) => dishCost(dishId, ingredients, techCardOverrides) * qty
 
-  // продажи по блюдам: выручка / себест. / валовая прибыль / наценка
+  // продажи по блюдам: выручка / себест. / валовая прибыль / наценка (ставка ҚҚС — у каждой позиции своя)
   const salesByDish = Object.values(closedOrders.reduce((acc, o) => {
     for (const l of o.lines) {
-      const a = (acc[l.dishId] ??= { name: l.name, qty: 0, rev: 0, cost: 0 })
+      const a = (acc[l.dishId] ??= { name: l.name, qty: 0, rev: 0, cost: 0, vat: l.vat })
       a.qty += l.qty; a.rev += lineTotal(l); a.cost += lineCost(l.dishId, l.qty)
     }
     return acc
-  }, {} as Record<string, { name: string; qty: number; rev: number; cost: number }>)).sort((a, b) => b.rev - a.rev)
+  }, {} as Record<string, { name: string; qty: number; rev: number; cost: number; vat: number }>)).sort((a, b) => b.rev - a.rev)
 
   // продажи по дням
   const salesByDay = Object.values(closedOrders.reduce((acc, o) => {
@@ -218,28 +247,11 @@ export default function OfficeScreen() {
     stockCrit === 'belowMin' ? i.stock < i.min : stockCrit === 'zero' ? i.stock === 0 : stockCrit === 'neg' ? i.stock < 0 : true)
   const stockValue = ingredients.reduce((s, i) => s + i.stock * i.costPerUnit, 0)
 
-  // OLAP-лайт: измерение × показатель
-  const olapRows = (() => {
-    const acc: Record<string, number> = {}
-    const bump = (k: string, v: number) => { acc[k] = (acc[k] ?? 0) + v }
-    for (const o of closedOrders) {
-      if (olapDim === 'dish') for (const l of o.lines) bump(l.name, olapMeasure === 'revenue' ? lineTotal(l) : olapMeasure === 'checks' ? 1 : l.qty)
-      else if (olapDim === 'payment') for (const p of o.payments) bump(p.name, olapMeasure === 'revenue' ? p.amount : olapMeasure === 'checks' ? 1 : 0)
-      else {
-        const k = olapDim === 'day' ? dayKey(o.paidAt) : (o.waiter || '—')
-        bump(k, olapMeasure === 'revenue' ? o.total : olapMeasure === 'checks' ? 1 : o.lines.reduce((s, l) => s + l.qty, 0))
-      }
-    }
-    return Object.entries(acc).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v)
-  })()
-  const olapMax = Math.max(1, ...olapRows.map((r) => r.v))
-  const olapFmt = (v: number) => (olapMeasure === 'revenue' ? formatTenge(v) : String(+v.toFixed(olapMeasure === 'qty' ? 2 : 0)))
-
   // P&L (упрощённо): выручка без НДС − себестоимость проданного − ФОТ (оклады + СО 3.5%)
   const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l.dishId, l.qty), 0), 0).toFixed(2)
   const payrollBase = staffList.reduce((s, p) => s + okladOf(p.id), 0) // оклады (gross)
   const payrollEmployer = staffList.reduce((s, p) => s + kzTax(okladOf(p.id)).employerCost, 0) // полная стоимость ФОТ с взносами РК
-  const grossProfit = +(noVat(revenue) - cogs).toFixed(2)
+  const grossProfit = +(netRevenue - cogs).toFixed(2)
   const opProfit = +(grossProfit - payrollEmployer).toFixed(2)
 
   // премия по мотивационным программам — за личные продажи сотрудника (waiter) в закрытых заказах
@@ -717,56 +729,7 @@ export default function OfficeScreen() {
             </div>
           </div>
         ) : section === 'loyalty' ? (
-          <div className="p-6 max-w-4xl">
-            <div className="text-xs text-gray-500 mb-4">
-              iikoCard (модуль 15) — бонусная программа: начисление % от заказа и оплата бонусами с лимитом. На кассе: «Карта гостя»
-              на заказе → начисление при оплате; тип оплаты «Бонусная карта» → списание бонусов в пределах лимита.
-            </div>
-
-            {/* бонусная программа */}
-            <div className="text-gray-500 text-xs uppercase mb-2">Бонусная программа</div>
-            <div className="bg-white border border-gray-200 rounded-md p-4 mb-6 flex flex-wrap items-end gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={loyaltyProgram.active} onChange={(e) => setLoyaltyProgram({ active: e.target.checked })} />
-                Программа активна
-              </label>
-              <label className="flex flex-col text-xs text-gray-500">Начисление, % от заказа
-                <input type="number" min={0} max={100} value={loyaltyProgram.accrualPct} onChange={(e) => setLoyaltyProgram({ accrualPct: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })} className="mt-1 h-9 w-24 rounded border border-gray-300 px-2 text-right" />
-              </label>
-              <label className="flex flex-col text-xs text-gray-500">Лимит оплаты бонусами, % чека
-                <input type="number" min={0} max={100} value={loyaltyProgram.redeemLimitPct} onChange={(e) => setLoyaltyProgram({ redeemLimitPct: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })} className="mt-1 h-9 w-24 rounded border border-gray-300 px-2 text-right" />
-              </label>
-              <label className="flex flex-col text-xs text-gray-500">Приветственный бонус, ₸
-                <input type="number" min={0} value={loyaltyProgram.welcomeBonus} onChange={(e) => setLoyaltyProgram({ welcomeBonus: Math.max(0, parseFloat(e.target.value) || 0) })} className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right" />
-              </label>
-            </div>
-
-            {/* карты гостей */}
-            <div className="text-gray-500 text-xs uppercase mb-2">Карты гостей (баланс бонусов)</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
-              <table className="w-full text-sm">
-                <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Номер</th><th>Владелец</th><th>Телефон</th><th className="text-right">Баланс бонусов</th><th className="p-2"></th></tr></thead>
-                <tbody>
-                  {loyaltyCards.length === 0 ? <tr><td colSpan={5} className="p-3 text-gray-400">Карт нет.</td></tr> : loyaltyCards.map((c) => (
-                    <tr key={c.id} className="border-b border-gray-100 last:border-0">
-                      <td className="p-2 font-mono">{c.number}</td>
-                      <td>{c.owner}</td>
-                      <td className="text-gray-500">{c.phone}</td>
-                      <td className="text-right font-medium text-emerald-700">{formatTenge(c.balance)}</td>
-                      <td className="p-2 text-right"><button onClick={() => removeLoyaltyCard(c.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex flex-wrap items-end gap-2">
-              <input value={newLc.number} onChange={(e) => setNewLc({ ...newLc, number: e.target.value })} placeholder="Номер карты" className="h-9 rounded border border-gray-300 px-2 w-36 font-mono" />
-              <input value={newLc.owner} onChange={(e) => setNewLc({ ...newLc, owner: e.target.value })} placeholder="Владелец" className="h-9 rounded border border-gray-300 px-2 flex-1 min-w-[140px]" />
-              <input value={newLc.phone} onChange={(e) => setNewLc({ ...newLc, phone: e.target.value })} placeholder="Телефон" className="h-9 rounded border border-gray-300 px-2 w-44" />
-              <button onClick={() => { if (newLc.number.trim() && newLc.owner.trim()) { addLoyaltyCard({ number: newLc.number.trim(), owner: newLc.owner.trim(), phone: newLc.phone.trim() }); setNewLc({ number: '', owner: '', phone: '' }) } }}
-                className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Выпустить карту (+{formatTenge(loyaltyProgram.welcomeBonus)})</button>
-            </div>
-          </div>
+          <OfficeLoyalty />
         ) : section === 'staff' ? (
           <div className="p-6 max-w-4xl">
             <div className="text-xs text-gray-500 mb-5">
@@ -953,7 +916,7 @@ export default function OfficeScreen() {
                           className="w-24 h-8 rounded border border-gray-300 px-2 text-right" />
                       </td>
                       <td className="p-2 text-right">
-                        <button onClick={() => { const v = window.prompt(`Приход «${i.name}», ${i.unit}:`, '0'); const n = parseFloat((v ?? '').replace(',', '.')); if (n > 0) receiveStock(i.id, n) }}
+                        <button onClick={() => setRecvItem({ id: i.id, name: i.name, unit: i.unit })}
                           className="h-8 px-3 rounded bg-emerald-500 text-white text-xs">+ Приход</button>
                       </td>
                     </tr>
@@ -1032,13 +995,16 @@ export default function OfficeScreen() {
             </div>
 
             {/* вкладки отчётов */}
-            <div className="flex gap-1 mb-4 border-b border-gray-200">
-              {([['sales', 'Продажи за период'], ['stock', 'Остатки на складах'], ['olap', 'OLAP-отчёт'], ['pnl', 'Прибыли и убытки']] as const).map(([id, label]) => (
-                <button key={id} onClick={() => setReport(id)}
-                  className={`px-4 h-10 text-sm -mb-px border-b-2 ${report === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-              ))}
-              <button onClick={exportTo1C} className="ml-auto h-8 self-center px-3 rounded bg-slate-700 text-white text-xs">Выгрузить в 1С (JSON)</button>
-            </div>
+            <Tabs active={report} onChange={setReport}
+              items={[
+                { id: 'sales', label: 'Продажи за период' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+              ]}
+              right={<>
+                {(report === 'sales' || report === 'stock' || report === 'vat') && (
+                  <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
+                )}
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+              </>} />
 
             {/* 1. Продажи за период */}
             {report === 'sales' && (
@@ -1052,18 +1018,19 @@ export default function OfficeScreen() {
                   {salesMode === 'byDish' ? (
                     <table className="w-full text-sm">
                       <thead><tr className="text-gray-500 text-left border-b border-gray-200">
-                        <th className="p-2">Блюдо</th><th className="text-right">Кол-во</th><th className="text-right">Выручка</th><th className="text-right">Без НДС</th><th className="text-right">Себест.</th><th className="text-right">Валовая</th><th className="text-right p-2">Наценка %</th>
+                        <th className="p-2">Блюдо</th><th className="text-right">Кол-во</th><th className="text-right">Выручка</th><th className="text-right">ҚҚС</th><th className="text-right">Без НДС</th><th className="text-right">Себест.</th><th className="text-right">Валовая</th><th className="text-right p-2">Наценка %</th>
                       </tr></thead>
                       <tbody>
-                        {salesByDish.length === 0 ? <tr><td colSpan={7} className="p-3 text-gray-400">Нет продаж.</td></tr> : salesByDish.map((d) => {
-                          const gross = +(noVat(d.rev) - d.cost).toFixed(2)
+                        {salesByDish.length === 0 ? <tr><td colSpan={8} className="p-3 text-gray-400">Нет продаж.</td></tr> : salesByDish.map((d) => {
+                          const gross = +(noVat(d.rev, d.vat) - d.cost).toFixed(2)
                           const markup = d.cost > 0 ? Math.round(gross / d.cost * 100) : 0
                           return (
                             <tr key={d.name} className="border-b border-gray-100 last:border-0">
                               <td className="p-2">{d.name}</td>
                               <td className="text-right">{+d.qty.toFixed(2)}</td>
                               <td className="text-right">{formatTenge(d.rev)}</td>
-                              <td className="text-right text-gray-500">{formatTenge(noVat(d.rev))}</td>
+                              <td className="text-right text-gray-400">{d.vat}%</td>
+                              <td className="text-right text-gray-500">{formatTenge(noVat(d.rev, d.vat))}</td>
                               <td className="text-right text-gray-500">{formatTenge(d.cost)}</td>
                               <td className="text-right font-medium">{formatTenge(gross)}</td>
                               <td className="text-right p-2 text-gray-600">{d.cost > 0 ? `${markup}%` : '—'}</td>
@@ -1123,32 +1090,39 @@ export default function OfficeScreen() {
               </div>
             )}
 
-            {/* 3. OLAP-лайт */}
-            {report === 'olap' && (
-              <div>
-                <div className="flex items-center gap-4 mb-4 text-sm">
-                  <label className="flex items-center gap-2">Измерение:
-                    <select value={olapDim} onChange={(e) => setOlapDim(e.target.value as typeof olapDim)} className="h-8 rounded border border-gray-300 px-2">
-                      <option value="dish">Блюдо</option><option value="day">День</option><option value="waiter">Официант</option><option value="payment">Тип оплаты</option>
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-2">Показатель:
-                    <select value={olapMeasure} onChange={(e) => setOlapMeasure(e.target.value as typeof olapMeasure)} className="h-8 rounded border border-gray-300 px-2">
-                      <option value="revenue">Выручка</option><option value="checks">Чеки</option><option value="qty">Количество</option>
-                    </select>
-                  </label>
+            {/* 2b. ҚҚС (НДС) по ставкам — отчёт 011/041 */}
+            {report === 'vat' && (
+              <div className="max-w-2xl">
+                <div className="text-xs text-gray-500 mb-3">Разбивка оборота по ставкам ҚҚС (мультиставка 16% / 0%). ҚҚС выделяется из суммы с налогом по каждой позиции чека.</div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Ставка ҚҚС</th><th className="text-right">Оборот (с ҚҚС)</th><th className="text-right">Без НДС</th><th className="text-right p-2">Сумма ҚҚС</th>
+                    </tr></thead>
+                    <tbody>
+                      {vatRowsKz.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Нет продаж.</td></tr> : vatRowsKz.map((r) => (
+                        <tr key={r.rate} className="border-b border-gray-100 last:border-0">
+                          <td className="p-2">{r.rate}%{r.rate === 0 ? ' (без НДС)' : ''}</td>
+                          <td className="text-right">{formatTenge(r.gross)}</td>
+                          <td className="text-right text-gray-500">{formatTenge(r.net)}</td>
+                          <td className="text-right p-2">{formatTenge(r.vat)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot><tr className="border-t border-gray-200 font-semibold">
+                      <td className="p-2">Итого</td>
+                      <td className="text-right">{formatTenge(vatRowsKz.reduce((s, r) => s + r.gross, 0))}</td>
+                      <td className="text-right">{formatTenge(netRevenue)}</td>
+                      <td className="text-right p-2">{formatTenge(vatKz)}</td>
+                    </tr></tfoot>
+                  </table>
                 </div>
-                <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
-                  {olapRows.length === 0 ? <div className="p-3 text-gray-400 text-sm">Нет данных.</div> : olapRows.map((r) => (
-                    <div key={r.k} className="flex items-center gap-3 px-4 h-9 border-b border-gray-100 last:border-0">
-                      <span className="w-44 truncate">{r.k}</span>
-                      <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${Math.round(r.v / olapMax * 100)}%` }} /></div>
-                      <span className="w-28 text-right tabular-nums">{olapFmt(r.v)}</span>
-                    </div>
-                  ))}
-                </div>
+                <div className="text-xs text-gray-400 mt-2">🇰🇿 ҚҚС 16% (с 01.01.2026) · 0% — необлагаемые/без НДС позиции (напр. услуга доставки). К уплате в КГД: <b className="text-gray-700">{formatTenge(vatKz)}</b>.</div>
               </div>
             )}
+
+            {/* 3. OLAP-куб (сводная таблица) */}
+            {report === 'olap' && <OfficeOlap />}
 
             {/* 4. P&L */}
             {report === 'pnl' && (
@@ -1156,8 +1130,8 @@ export default function OfficeScreen() {
                 <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
                   {[
                     ['Выручка (с ҚҚС)', revenue, false],
-                    ['ҚҚС 16% (в т.ч.)', -vatKz, false],
-                    ['Выручка без НДС', noVat(revenue), true],
+                    [multiRateKz ? 'ҚҚС (в т.ч., все ставки)' : 'ҚҚС 16% (в т.ч.)', -vatKz, false],
+                    ['Выручка без НДС', netRevenue, true],
                     ['Себестоимость проданного', -cogs, false],
                     ['Валовая прибыль', grossProfit, true],
                     ['ФОТ (оклады)', -payrollBase, false],
@@ -1183,8 +1157,8 @@ export default function OfficeScreen() {
             <div className="text-gray-500 text-xs uppercase mb-2">Налоги с продаж (KZ)</div>
             <div className="grid grid-cols-4 gap-3 mb-6">
               <OfficeStat label="Выручка" value={formatTenge(revenue)} />
-              <OfficeStat label="ҚҚС 16% к уплате" value={formatTenge(vatKz)} />
-              <OfficeStat label="Без НДС" value={formatTenge(+(revenue - vatKz).toFixed(2))} />
+              <OfficeStat label={multiRateKz ? 'ҚҚС к уплате (16%/0%)' : 'ҚҚС 16% к уплате'} value={formatTenge(vatKz)} />
+              <OfficeStat label="Без НДС" value={formatTenge(netRevenue)} />
               <OfficeStat label="СНО · БИН" value="ОУР · 123456789012" />
             </div>
 
@@ -1205,13 +1179,30 @@ export default function OfficeScreen() {
 
             <div className="text-gray-500 text-xs uppercase mb-2">Приходная накладная → входящая ЭСФ</div>
             <div className="bg-white border border-gray-200 rounded-md p-4 mb-3">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-sm text-gray-500">Поставщик:</span>
-                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="h-9 rounded border border-gray-300 px-2 flex-1">
-                  <option value="">— выберите —</option>
-                  {contractors.map((c) => <option key={c.id} value={c.id}>{c.name} (БИН {c.bin})</option>)}
-                </select>
+              {/* ШАПКА накладной */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <label className="flex flex-col text-xs text-gray-500 col-span-2">Поставщик
+                  <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="mt-1 h-9 rounded border border-gray-300 px-2 text-sm">
+                    <option value="">— выберите —</option>
+                    {contractors.map((c) => <option key={c.id} value={c.id}>{c.name} (БИН {c.bin})</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col text-xs text-gray-500">Склад-получатель
+                  <select value={pStore} onChange={(e) => setPStore(e.target.value)} className="mt-1 h-9 rounded border border-gray-300 px-2 text-sm">
+                    {warehouses.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col text-xs text-gray-500">Дата накладной
+                  <input type="date" value={pDate} onChange={(e) => setPDate(e.target.value)} className="mt-1 h-9 rounded border border-gray-300 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col text-xs text-gray-500">№ накладной
+                  <input value={pNo} onChange={(e) => setPNo(e.target.value)} placeholder="авто (ПН-…)" className="mt-1 h-9 rounded border border-gray-300 px-2 text-sm" />
+                </label>
+                <label className="flex flex-col text-xs text-gray-500">№ ЭСФ
+                  <input value={pEsf} onChange={(e) => setPEsf(e.target.value)} placeholder="авто (ESF-KZ-…)" className="mt-1 h-9 rounded border border-gray-300 px-2 text-sm font-mono" />
+                </label>
               </div>
+              {/* ТАБЛИЧНАЯ ЧАСТЬ — добавление строки */}
               <div className="flex items-end gap-2 mb-3">
                 <select value={pIng} onChange={(e) => setPIng(e.target.value)} className="h-9 rounded border border-gray-300 px-2 flex-1">
                   {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
@@ -1220,30 +1211,50 @@ export default function OfficeScreen() {
                 <input value={pPrice} onChange={(e) => setPPrice(e.target.value)} inputMode="decimal" placeholder="цена ₸" className="w-28 h-9 rounded border border-gray-300 px-2 text-right" />
                 <button onClick={addPLine} className="h-9 px-3 rounded bg-gray-200 text-gray-700 text-sm">+ строка</button>
               </div>
-              {pLines.length > 0 && (
-                <div className="border border-gray-100 rounded mb-3">
-                  {pLines.map((l) => (
-                    <div key={l.ingredientId} className="flex items-center gap-3 px-3 py-1.5 border-b border-gray-100 last:border-0 text-sm">
-                      <span className="flex-1">{l.name}</span><span className="text-gray-500">{l.qty} × {formatTenge(l.price)}</span><span className="w-24 text-right">{formatTenge(l.qty * l.price)}</span>
-                      <button onClick={() => setPLines((ls) => ls.filter((x) => x.ingredientId !== l.ingredientId))} className="text-gray-400 hover:text-red-500">✕</button>
-                    </div>
-                  ))}
-                  <div className="flex justify-between px-3 py-1.5 text-sm font-semibold"><span>Итого (с ҚҚС)</span><span>{formatTenge(pLines.reduce((s, l) => s + l.qty * l.price, 0))}</span></div>
-                </div>
-              )}
+              {pLines.length > 0 && (() => {
+                const subtotal = pLines.reduce((s, l) => s + l.qty * l.price, 0)
+                const vatIncl = +(subtotal - subtotal / 1.16).toFixed(2)
+                return (
+                  <div className="border border-gray-100 rounded mb-3 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-400 text-xs text-left border-b border-gray-100">
+                        <th className="px-3 py-1.5">Товар</th><th className="text-right">Кол-во</th><th className="text-right">Цена</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС 16%</th><th className="px-2"></th>
+                      </tr></thead>
+                      <tbody>
+                        {pLines.map((l) => {
+                          const sum = l.qty * l.price
+                          return (
+                            <tr key={l.ingredientId} className="border-b border-gray-100 last:border-0">
+                              <td className="px-3 py-1.5">{l.name}</td>
+                              <td className="text-right text-gray-500">{l.qty}</td>
+                              <td className="text-right text-gray-500">{formatTenge(l.price)}</td>
+                              <td className="text-right">{formatTenge(sum)}</td>
+                              <td className="text-right text-gray-500">{formatTenge(sum - sum / 1.16)}</td>
+                              <td className="px-2 text-right"><button onClick={() => setPLines((ls) => ls.filter((x) => x.ingredientId !== l.ingredientId))} className="text-gray-400 hover:text-red-500">✕</button></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="font-semibold border-t border-gray-200"><td className="px-3 py-1.5" colSpan={3}>Итого (с ҚҚС)</td><td className="text-right">{formatTenge(subtotal)}</td><td className="text-right text-gray-600">{formatTenge(vatIncl)}</td><td /></tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )
+              })()}
               <button onClick={provesti} disabled={!supplierId || pLines.length === 0}
-                className={`h-9 px-4 rounded text-sm ${supplierId && pLines.length ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Провести (приход + ЭСФ)</button>
+                className={`h-9 px-4 rounded text-sm ${supplierId && pLines.length ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Провести (приход на «{pStore}» + ЭСФ)</button>
             </div>
 
             <div className="text-gray-500 text-xs uppercase mb-2">Входящие ЭСФ / приходные</div>
             <div className="bg-white border border-gray-200 rounded-md overflow-auto">
               {incoming.length === 0 ? <div className="p-3 text-gray-400 text-sm">Накладных пока нет.</div> : (
                 <table className="w-full text-sm">
-                  <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">№</th><th>Дата</th><th>Поставщик</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС</th><th className="p-2">ЭСФ</th></tr></thead>
+                  <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">№</th><th>Дата</th><th>Поставщик</th><th>Склад</th><th className="text-right">Сумма</th><th className="text-right">ҚҚС</th><th className="p-2">ЭСФ</th></tr></thead>
                   <tbody>
                     {incoming.map((inv) => (
                       <tr key={inv.id} className="border-b border-gray-100 last:border-0">
-                        <td className="p-2">{inv.no}</td><td>{inv.date.split(',')[0]}</td><td>{inv.supplierName}</td>
+                        <td className="p-2">{inv.no}</td><td>{inv.date.split(',')[0]}</td><td>{inv.supplierName}</td><td className="text-gray-500">{inv.store ?? '—'}</td>
                         <td className="text-right">{formatTenge(inv.total)}</td><td className="text-right">{formatTenge(inv.vat)}</td><td className="p-2 font-mono text-xs">{inv.esfNo}</td>
                       </tr>
                     ))}
@@ -1333,7 +1344,7 @@ export default function OfficeScreen() {
                             <button disabled={remaining <= 0}
                               onClick={() => { paySalary(p.id, 'settlement', remaining); printToast(`Расчёт ${p.name}: ${formatTenge(remaining)} — изъято из кассы`) }}
                               className={`h-7 px-2 rounded text-xs ${remaining > 0 ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-400'}`}>Расчёт</button>
-                            <button onClick={() => { const a = parseFloat((window.prompt(`Удержание/штраф для ${p.name}, ₸:`, '') ?? '').replace(',', '.')); if (a > 0) { const r = window.prompt('Причина:', 'Штраф') ?? 'Штраф'; addDeduction(p.id, a, r) } }}
+                            <button onClick={() => setDeductStaff({ id: p.id, name: p.name })}
                               className="h-7 px-2 rounded text-xs bg-rose-100 text-rose-700">Штраф</button>
                           </div>
                         </td>
@@ -1434,21 +1445,20 @@ export default function OfficeScreen() {
               Финансы (Phase 7). <b>Кассовая книга</b> — хронология наличных операций с остатком; <b>ДДС</b> — притоки/оттоки денежных средств.
               Источник — наличные продажи, внесения/изъятия (вкл. инкассацию и выплаты ЗП), возвраты наличными, разменный фонд смены.
             </div>
-            <div className="flex gap-1 mb-4 border-b border-gray-200">
-              {([['book', 'Кассовая книга'], ['cashflow', 'ДДС (приток/отток)'], ['ledger', 'Бухучёт (план/проводки/ОСВ/баланс)']] as const).map(([id, label]) => (
-                <button key={id} onClick={() => setFinanceTab(id)}
-                  className={`px-4 h-10 text-sm -mb-px border-b-2 ${financeTab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-              ))}
-            </div>
+            <Tabs active={financeTab} onChange={setFinanceTab} items={[
+              { id: 'book', label: 'Кассовая книга' }, { id: 'cashflow', label: 'ДДС (приток/отток)' }, { id: 'ledger', label: 'Бухучёт (план/проводки/ОСВ/баланс)' },
+            ]} />
             {financeTab === 'ledger' ? <OfficeLedger /> : (() => {
               const opening = cashShift?.openingCash ?? 0
+              // разменный фонд показан отдельной строкой «начало смены»; его движение-внесение исключаем из «внесений», иначе двойной счёт
+              const isFund = (m: { kind: 'in' | 'out'; type: string }) => m.kind === 'in' && /размен|фонд|начальн/i.test(m.type)
               const cashSalesRows = closedOrders.map((o) => ({ at: o.paidAt, label: `Продажа · чек №${o.id} (нал.)`, in: o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((s, p) => s + p.amount, 0), out: 0 })).filter((r) => r.in > 0)
-              const mvRows = cashMovements.map((m) => ({ at: m.at, label: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}${m.comment ? ' · ' + m.comment : ''}`, in: m.kind === 'in' ? m.amount : 0, out: m.kind === 'out' ? m.amount : 0 }))
+              const mvRows = cashMovements.filter((m) => !isFund(m)).map((m) => ({ at: m.at, label: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}${m.comment ? ' · ' + m.comment : ''}`, in: m.kind === 'in' ? m.amount : 0, out: m.kind === 'out' ? m.amount : 0 }))
               const refundRows = refunds.filter((r) => r.method === 'cash').map((r) => ({ at: r.at, label: `Возврат нал. · заказ №${r.orderId}`, in: 0, out: r.amount }))
               const parseAt = (s: string) => { const m = /(\d{2})\.(\d{2})\.(\d{4}),?\s*(\d{2}):(\d{2})(?::(\d{2}))?/.exec(s); return m ? `${m[3]}${m[2]}${m[1]}${m[4]}${m[5]}${m[6] ?? '00'}` : s }
               const rows = [...cashSalesRows, ...mvRows, ...refundRows].sort((a, b) => parseAt(a.at).localeCompare(parseAt(b.at)))
               const cashSales = cashSalesRows.reduce((s, r) => s + r.in, 0)
-              const cashIn = cashMovements.filter((m) => m.kind === 'in').reduce((s, m) => s + m.amount, 0)
+              const cashIn = cashMovements.filter((m) => m.kind === 'in' && !isFund(m)).reduce((s, m) => s + m.amount, 0) // внесения без разменного фонда
               const cashOut = cashMovements.filter((m) => m.kind === 'out').reduce((s, m) => s + m.amount, 0)
               const refundsCash = refundRows.reduce((s, r) => s + r.out, 0)
               const closing = +(opening + cashSales + cashIn - cashOut - refundsCash).toFixed(2)
@@ -1499,183 +1509,28 @@ export default function OfficeScreen() {
             })()}
           </div>
         ) : section === 'journal' ? (
-          <div className="p-6 max-w-4xl">
-            <div className="text-xs text-gray-500 mb-4">
-              Журнал событий (Журналы, монитор операций) — хронология действий кассы и офиса за текущую сессию: продажи, возвраты,
-              касса, списания, склад, цены, выплаты. Источник — оперативный слой мок-стора.
-            </div>
-            {(() => {
-              const ev: { at: string; cat: string; label: string; who: string; sum?: string }[] = []
-              for (const o of closedOrders) ev.push({ at: o.paidAt, cat: 'Продажи', label: `Чек №${o.id} · ФД ${o.fiscalDocNo}`, who: o.waiter, sum: formatTenge(o.total) })
-              for (const r of refunds) ev.push({ at: r.at, cat: 'Возвраты', label: `Возврат по заказу №${r.orderId} · ${r.reason}`, who: r.by, sum: '− ' + formatTenge(r.amount) })
-              for (const m of cashMovements) ev.push({ at: m.at, cat: 'Касса', label: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}${m.comment ? ' · ' + m.comment : ''}`, who: '', sum: (m.kind === 'in' ? '+ ' : '− ') + formatTenge(m.amount) })
-              for (const w of writeOffs) ev.push({ at: w.at, cat: 'Списания', label: `${w.name} ×${w.qty} · ${w.reason}`, who: '', sum: formatTenge(w.cost) })
-              for (const d of documents) ev.push({ at: d.at, cat: 'Склад', label: `${d.type}${d.reason ? ' · ' + d.reason : ''} · ${d.store}`, who: d.by, sum: `${d.lines.length} поз.` })
-              for (const p of priceOrders.filter((x) => x.status === 'active')) ev.push({ at: p.createdAt, cat: 'Цены', label: `Приказ ${p.no} активирован · ${p.lines.length} позиций`, who: '', sum: '' })
-              for (const s of salaryPayouts) ev.push({ at: s.at, cat: 'Зарплата', label: `${s.kind === 'advance' ? 'Аванс' : 'Расчёт'} · ${staffList.find((x) => x.id === s.staffId)?.name ?? s.staffId}`, who: s.by, sum: '− ' + formatTenge(s.amount) })
-              const cats = ['all', 'Продажи', 'Возвраты', 'Касса', 'Списания', 'Склад', 'Цены', 'Зарплата']
-              const parseAt = (s: string) => { const m = /(\d{2})\.(\d{2})\.(\d{4}),?\s*(\d{2}):(\d{2})(?::(\d{2}))?/.exec(s); return m ? `${m[3]}${m[2]}${m[1]}${m[4]}${m[5]}${m[6] ?? '00'}` : s }
-              const rows = ev.filter((e) => journalCat === 'all' || e.cat === journalCat).sort((a, b) => parseAt(b.at).localeCompare(parseAt(a.at)))
-              const badge: Record<string, string> = { Продажи: 'bg-emerald-100 text-emerald-700', Возвраты: 'bg-rose-100 text-rose-700', Касса: 'bg-blue-100 text-blue-700', Списания: 'bg-orange-100 text-orange-700', Склад: 'bg-violet-100 text-violet-700', Цены: 'bg-amber-100 text-amber-700', Зарплата: 'bg-teal-100 text-teal-700' }
-              return (
-                <>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {cats.map((c) => (
-                      <button key={c} onClick={() => setJournalCat(c)}
-                        className={`h-8 px-3 rounded-full text-sm ${journalCat === c ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{c === 'all' ? 'Все' : c}</button>
-                    ))}
-                    <span className="ml-auto self-center text-xs text-gray-400">событий: {rows.length}</span>
-                  </div>
-                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
-                    <table className="w-full text-sm">
-                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Время</th><th>Тип</th><th>Событие</th><th>Кто</th><th className="text-right p-2">Сумма</th></tr></thead>
-                      <tbody>
-                        {rows.length === 0 && <tr><td colSpan={5} className="p-4 text-gray-400">Событий нет.</td></tr>}
-                        {rows.map((e, i) => (
-                          <tr key={i} className="border-b border-gray-50 last:border-0">
-                            <td className="p-2 text-gray-500 whitespace-nowrap text-xs">{e.at}</td>
-                            <td><span className={`text-xs px-2 py-0.5 rounded-full ${badge[e.cat] ?? 'bg-gray-100 text-gray-600'}`}>{e.cat}</span></td>
-                            <td>{e.label}</td>
-                            <td className="text-gray-500 text-xs">{e.who || '—'}</td>
-                            <td className="text-right p-2 whitespace-nowrap">{e.sum}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )
-            })()}
-          </div>
+          <OfficeJournal />
         ) : section === 'delivery' ? (
           <OfficeDelivery />
         ) : section === 'admin' ? (
-          <div className="p-6 max-w-4xl">
-            <div className="text-xs text-gray-500 mb-4">Администрирование (модуль 12) — системные настройки: лицензии, шаблоны печатных форм, устройства ввода, обслуживание БД.</div>
-            <div className="flex gap-1 mb-4 border-b border-gray-200">
-              {([['license', 'Лицензии'], ['print', 'Печатные формы'], ['devices', 'Устройства ввода'], ['db', 'Обслуживание БД']] as const).map(([id, label]) => (
-                <button key={id} onClick={() => setAdminTab(id)}
-                  className={`px-4 h-10 text-sm -mb-px border-b-2 ${adminTab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-              ))}
-            </div>
-
-            {adminTab === 'license' && (
-              <>
-                <div className="flex flex-wrap items-end gap-3 mb-4">
-                  <label className="flex flex-col text-xs text-gray-500">Клиентский ID
-                    <input value={licenseClientId} onChange={(e) => setLicenseClientId(e.target.value)} className="mt-1 h-9 w-64 rounded border border-gray-300 px-2 font-mono" />
-                  </label>
-                  <div className="text-xs text-gray-400">Лицензия проверяется ежедневно онлайн; без интернета — до 30 дней.</div>
-                </div>
-                <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
-                  <table className="w-full text-sm">
-                    <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Модуль</th><th className="text-right">Количество</th><th>Действует с</th><th>по</th><th className="p-2"></th></tr></thead>
-                    <tbody>
-                      {licenses.map((l) => (
-                        <tr key={l.id} className="border-b border-gray-100 last:border-0">
-                          <td className="p-2">{l.module}</td>
-                          <td className="text-right">{l.count}</td>
-                          <td className="text-gray-500">{formatRu(l.from)}</td>
-                          <td className="text-gray-500">{formatRu(l.to)}</td>
-                          <td className="p-2 text-right"><button onClick={() => removeLicense(l.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <button onClick={() => addLicense({ module: 'Новый модуль', count: 1, from: todayISO(), to: addDaysISO(todayISO(), 365) })} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm inline-flex items-center gap-1"><Plus size={14} />Добавить лицензию</button>
-              </>
-            )}
-
-            {adminTab === 'print' && (
-              <>
-                <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
-                  <table className="w-full text-sm">
-                    <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Шаблон</th><th>Тип модели</th><th>Вид</th><th className="p-2 text-right">Действия</th></tr></thead>
-                    <tbody>
-                      {printTemplates.map((t) => (
-                        <tr key={t.id} className="border-b border-gray-100 last:border-0">
-                          <td className="p-2">{t.name}</td>
-                          <td className="text-gray-500">{t.type}</td>
-                          <td><span className={`text-xs px-2 py-0.5 rounded-full ${t.kind === 'standard' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>{t.kind === 'standard' ? 'стандартный' : 'пользовательский'}</span></td>
-                          <td className="p-2 text-right">
-                            <button onClick={() => printToast(`Шаблон «${t.name}» открыт в дизайнере (Stimulsoft, мок)`)} className="text-xs text-blue-600 hover:underline mr-3">Открыть</button>
-                            {t.kind === 'custom' ? <button onClick={() => removePrintTemplate(t.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button> : <span className="text-gray-300 text-xs">встроенный</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="flex items-end gap-2">
-                  <input value={newTpl.name} onChange={(e) => setNewTpl({ ...newTpl, name: e.target.value })} placeholder="Имя шаблона" className="h-9 rounded border border-gray-300 px-2 flex-1" />
-                  <select value={newTpl.type} onChange={(e) => setNewTpl({ ...newTpl, type: e.target.value })} className="h-9 rounded border border-gray-300 px-2">
-                    {['Чек', 'Пречек', 'Товарный чек', 'Z-отчёт', 'Приходная накладная', 'Акт списания', 'Сервисный чик'].map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                  <button onClick={() => { if (newTpl.name.trim()) { addPrintTemplate(newTpl.name.trim(), newTpl.type); setNewTpl({ name: '', type: 'Чек' }) } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Создать</button>
-                </div>
-              </>
-            )}
-
-            {adminTab === 'devices' && (
-              <>
-                <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-3">
-                  <table className="w-full text-sm">
-                    <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Устройство</th><th>Тип</th><th>Группа</th><th className="p-2"></th></tr></thead>
-                    <tbody>
-                      {inputDevices.map((d) => (
-                        <tr key={d.id} className="border-b border-gray-100 last:border-0">
-                          <td className="p-2">{d.name}</td>
-                          <td className="text-gray-500">{d.type}</td>
-                          <td className="text-gray-500 text-xs">{d.group === 'pos' ? 'POS' : 'Клавиатурные'}</td>
-                          <td className="p-2 text-right"><button onClick={() => removeInputDevice(d.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="flex items-end gap-2">
-                  <input value={newDev.name} onChange={(e) => setNewDev({ ...newDev, name: e.target.value })} placeholder="Название устройства" className="h-9 rounded border border-gray-300 px-2 flex-1" />
-                  <select value={newDev.type} onChange={(e) => setNewDev({ ...newDev, type: e.target.value })} className="h-9 rounded border border-gray-300 px-2">
-                    {['Сканер штрихкода', 'Считыватель магнитных карт', 'Клавиатура', 'WaiterLock'].map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                  <select value={newDev.group} onChange={(e) => setNewDev({ ...newDev, group: e.target.value as 'keyboard' | 'pos' })} className="h-9 rounded border border-gray-300 px-2">
-                    <option value="keyboard">Клавиатурные</option><option value="pos">POS</option>
-                  </select>
-                  <button onClick={() => { if (newDev.name.trim()) { addInputDevice({ name: newDev.name.trim(), type: newDev.type, group: newDev.group }); setNewDev({ name: '', type: 'Сканер штрихкода', group: 'pos' }) } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить</button>
-                </div>
-              </>
-            )}
-
-            {adminTab === 'db' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white border border-gray-200 rounded-md p-4">
-                  <div className="text-gray-500 text-xs uppercase mb-2">Статус бэкапов</div>
-                  <FinRow k="Полный бэкап" v="OK · сегодня 03:00" />
-                  <FinRow k="Бэкап логов" v="OK · каждые 15 мин" />
-                  <FinRow k="Режим восстановления" v="Full recovery" />
-                </div>
-                <div className="bg-white border border-gray-200 rounded-md p-4">
-                  <div className="text-gray-500 text-xs uppercase mb-2">Информация о БД</div>
-                  <FinRow k="Размер данных" v="412 МБ" />
-                  <FinRow k="Размер индексов" v="88 МБ" />
-                  <FinRow k="Лог-файл" v="36 МБ" />
-                  <FinRow k="Свободно на диске" v="64 ГБ" />
-                </div>
-                <div className="bg-white border border-gray-200 rounded-md p-4 col-span-2">
-                  <div className="text-gray-500 text-xs uppercase mb-2">Сервис</div>
-                  <div className="flex flex-wrap gap-2">
-                    {['Произвести бэкап сейчас', 'Перестроить индексы', 'Очистить лог транзакций', 'Сжать БД', 'Перезапустить сервер БД'].map((b) => (
-                      <button key={b} onClick={() => printToast(`${b} — выполнено (мок)`)} className="h-9 px-3 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-100">{b}</button>
-                    ))}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-2">⚠️ «Сжать БД» может повысить фрагментацию; «Очистить лог» в режиме Full требует последующего полного бэкапа.</div>
-                </div>
-              </div>
-            )}
-          </div>
+          <OfficeAdmin />
         ) : null}
       </div>
+
+      {recvItem && (
+        <InputModal title={`Приход на склад`} desc={`«${recvItem.name}» (${recvItem.unit})`}
+          fields={[{ key: 'qty', label: `Количество, ${recvItem.unit}`, type: 'number', placeholder: '0' }]}
+          okLabel="Оприходовать"
+          onOk={(v) => { const n = parseFloat((v.qty || '').replace(',', '.')); if (n > 0) { receiveStock(recvItem.id, n); printToast(`Приход: ${recvItem.name} +${n} ${recvItem.unit}`) } setRecvItem(null) }}
+          onCancel={() => setRecvItem(null)} />
+      )}
+      {deductStaff && (
+        <InputModal title="Удержание / штраф" desc={deductStaff.name}
+          fields={[{ key: 'amount', label: 'Сумма, ₸', type: 'number', placeholder: '0' }, { key: 'reason', label: 'Причина', placeholder: 'Штраф', default: 'Штраф' }]}
+          okLabel="Удержать"
+          onOk={(v) => { const a = parseFloat((v.amount || '').replace(',', '.')); if (a > 0) { addDeduction(deductStaff.id, a, v.reason.trim() || 'Штраф'); printToast(`Удержание ${deductStaff.name}: ${formatTenge(a)}`) } setDeductStaff(null) }}
+          onCancel={() => setDeductStaff(null)} />
+      )}
     </div>
   )
 }

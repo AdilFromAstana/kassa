@@ -5,6 +5,7 @@ import { usePos, lineTotal, orderSubtotal, orderTotal, isStopped } from '../stor
 import { groupsByPage, dishesByGroup, findDish } from '../mock/menu'
 import { dishMaxPortions } from '../mock/warehouse'
 import { formatTenge } from '../lib/money'
+import { redeemLimitPctOf } from '../lib/loyalty'
 import { minutesSince } from '../lib/date'
 import { printToast } from '../lib/print'
 import ModifiersModal from '../components/ModifiersModal'
@@ -12,6 +13,7 @@ import TransferModal from '../components/TransferModal'
 import SearchModal from '../components/SearchModal'
 import QuantityModal from '../components/QuantityModal'
 import DiscountModal from '../components/DiscountModal'
+import InputModal from '../components/InputModal'
 import type { Dish, SelectedModifier } from '../types'
 
 // Рабочий экран заказа: гости — вкладками сверху (как в iikoFront). Блюда падают активному гостю.
@@ -70,6 +72,8 @@ export default function OrderScreen() {
   const addGuest = () => { pos.addGuest(order.id); setActiveGuest(order.guests + 1) }
 
   const [qtyOpen, setQtyOpen] = useState(false)
+  const [tabOpen, setTabOpen] = useState(false) // барный счёт (Tab) — тач-модалка ввода названия
+  const [cmtOpen, setCmtOpen] = useState(false)  // комментарий к позиции/заказу — тач-модалка
   const setQtyManual = () => { if (selUid) setQtyOpen(true) }
   const selLine = order.lines.find((l) => l.uid === selUid) ?? null
   // скидка/надбавка — через модалку с офисными скидками + клубной картой (Дисконтная система)
@@ -301,14 +305,14 @@ export default function OrderScreen() {
               { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
               { label: 'Сменить официанта', on: () => setWaiterPick(true), disabled: !pos.can('F_COW') },
               { label: `Тип заказа: ${TYPE_LABEL[order.type]}`, on: () => setTypePick(true), disabled: false },
-              ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { const n = window.prompt('Название барного счёта (имя гостя/карта):', order.tabName ?? ''); if (n != null) pos.setOrderTab(order.id, n.trim() || undefined) }, disabled: false }] : []),
+              ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { setShowMore(false); setTabOpen(true) }, disabled: false }] : []),
               ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
               { label: `Ценовая категория: ${pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name ?? 'Базовая'}`, on: () => setCatPick(true), disabled: false },
               ...(est.iikoCard && pos.loyaltyProgram.active ? [{ label: loyaltyCard ? `Карта гостя: ${loyaltyCard.owner}` : 'Карта гостя (iikoCard)', on: () => { setGuestCard(true); setCardNum('') }, disabled: false }] : []),
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
               { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 || !pos.can('F_MPR') },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
-              ...(est.comments ? [{ label: selUid ? 'Комментарий к позиции' : 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:', (selUid && selLine?.comment) || ''); if (c != null) { if (selUid) pos.setLineComment(selUid, c); else if (c) printToast('Комментарий сохранён') } }, disabled: false }] : []),
+              ...(est.comments ? [{ label: selUid ? 'Комментарий к позиции' : 'Комментарий к заказу', on: () => { setShowMore(false); setCmtOpen(true) }, disabled: false }] : []),
             ].map((it) => (
               <button key={it.label} disabled={it.disabled} onClick={() => { setShowMore(false); it.on() }}
                 className="w-full text-left px-4 h-12 rounded-md hover:bg-gray-100 active:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between">
@@ -352,6 +356,20 @@ export default function OrderScreen() {
       {modDish && <ModifiersModal dish={modDish} onConfirm={onModConfirm} onCancel={() => setModDish(null)} />}
       {showTransfer && <TransferModal orderId={order.id} onClose={() => setShowTransfer(false)} onMoved={() => { setShowTransfer(false); navigate('/halls') }} />}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} onPick={(d) => { setShowSearch(false); addDish(d) }} />}
+      {tabOpen && (
+        <InputModal title="Барный счёт (Tab)" desc="Имя гостя или номер карты — открытый счёт без стола."
+          fields={[{ key: 'name', label: 'Название счёта', placeholder: 'напр. Алмас / карта 12', default: order.tabName ?? '' }]}
+          okLabel={order.tabName ? 'Сохранить' : 'Открыть счёт'}
+          onOk={(v) => { pos.setOrderTab(order.id, v.name.trim() || undefined); setTabOpen(false) }}
+          onCancel={() => setTabOpen(false)} />
+      )}
+      {cmtOpen && (
+        <InputModal title={selUid ? 'Комментарий к позиции' : 'Комментарий к заказу'} desc={selUid ? selLine?.name : 'Печатается на марке кухни'}
+          fields={[{ key: 'comment', label: 'Комментарий', placeholder: 'напр. без лука', default: (selUid && selLine?.comment) || '' }]}
+          okLabel="Сохранить"
+          onOk={(v) => { if (selUid) pos.setLineComment(selUid, v.comment); else if (v.comment.trim()) printToast('Комментарий сохранён'); setCmtOpen(false) }}
+          onCancel={() => setCmtOpen(false)} />
+      )}
       {showDiscount && (
         <DiscountModal
           subtotal={orderSubtotal(order)}
@@ -424,7 +442,7 @@ export default function OrderScreen() {
           <div className="bg-white text-gray-800 rounded-lg p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
             <div className="text-lg font-semibold mb-3">Тип заказа</div>
             <div className="flex flex-col gap-2">
-              {pos.orderTypes.map((t) => (
+              {pos.orderTypes.filter((t) => t.mode !== 'delivery' || est.delivery).map((t) => (
                 <button key={t.id} onClick={() => { pos.setOrderType(order.id, t.mode); setTypePick(false); printToast(`Тип заказа: ${t.name}`) }}
                   className={`h-12 rounded-md flex items-center justify-between px-4 ${order.type === t.mode ? 'bg-gray-200 text-gray-800' : 'bg-pos-blue text-white'}`}>
                   <span>{t.name}</span><span className="text-xs opacity-70">ҚҚС {t.vat}%</span>
@@ -458,7 +476,7 @@ export default function OrderScreen() {
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30" onClick={() => setGuestCard(false)}>
           <div className="bg-white text-gray-800 rounded-lg p-5 w-[420px]" onClick={(e) => e.stopPropagation()}>
             <div className="text-lg font-semibold mb-1">Карта гостя (iikoCard)</div>
-            <div className="text-sm text-gray-500 mb-3">Начисление {pos.loyaltyProgram.accrualPct}% от оплаты деньгами · оплата бонусами до {pos.loyaltyProgram.redeemLimitPct}% чека.</div>
+            <div className="text-sm text-gray-500 mb-3">Начисление бонусов по акциям iikoCard · оплата бонусами до {redeemLimitPctOf(pos.promoActions)}% чека.</div>
             {loyaltyCard ? (
               <div className="bg-pink-50 border border-pink-200 rounded-md p-3 mb-3">
                 <div className="font-medium">★ {loyaltyCard.owner}</div>

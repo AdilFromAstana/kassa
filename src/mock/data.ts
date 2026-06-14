@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings, CorpSettings, Concept, DocNumber, SyncPoint, Account } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, PromoAction, DepositProgram, Certificate, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings, CorpSettings, CorpTree, Concept, DocNumber, SyncPoint, Account, Invoice } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -113,19 +113,19 @@ export const docNumberingSeed: DocNumber[] = [
   { id: 'dn-prig', docType: 'Акт приготовления', template: '{D}/ПРГ-#', counter: 31 },
 ]
 // «структура сети» (дерево корпорации) — статичная для мока
-export const corpTreeSeed = {
+export const corpTreeSeed: CorpTree = {
   name: 'Сеть «Mumtaz»',
   legal: [{
-    name: 'ТОО «Мумтаз»', bin: '123456789012',
+    id: 'le-1', name: 'ТОО «Мумтаз»', bin: '123456789012',
     divisions: [{
-      name: 'Подразделение Астана',
+      id: 'dv-1', name: 'Подразделение Астана',
       points: [
-        { name: 'ТП Астана (центр)', warehouses: ['Основной склад', 'Бар', 'Кухонный цех'] },
-        { name: 'ТП Астана (Левый берег)', warehouses: ['Основной склад'] },
+        { id: 'pt-1', name: 'ТП Астана (центр)', warehouses: [{ id: 'wh-1', name: 'Основной склад' }, { id: 'wh-2', name: 'Бар' }, { id: 'wh-3', name: 'Кухонный цех' }] },
+        { id: 'pt-2', name: 'ТП Астана (Левый берег)', warehouses: [{ id: 'wh-4', name: 'Основной склад' }] },
       ],
     }, {
-      name: 'Производство (цех)',
-      points: [{ name: 'Центральный цех', warehouses: ['Склад заготовок'] }],
+      id: 'dv-2', name: 'Производство (цех)',
+      points: [{ id: 'pt-3', name: 'Центральный цех', warehouses: [{ id: 'wh-5', name: 'Склад заготовок' }] }],
     }],
   }],
 }
@@ -183,10 +183,26 @@ export const inputDevicesSeed: InputDevice[] = [
   { id: 'd-msr', name: 'Считыватель карт', type: 'Считыватель магнитных карт', group: 'keyboard' },
 ]
 
-export const loyaltyProgramSeed: LoyaltyProgram = { active: true, accrualPct: 5, redeemLimitPct: 50, welcomeBonus: 1000 }
+export const loyaltyProgramSeed: LoyaltyProgram = { active: true }
 export const loyaltyCardsSeed: LoyaltyCard[] = [
-  { id: 'lc-1', number: '7711 0001', owner: 'Данияр К.', phone: '+7 701 111 22 33', balance: 4200 },
-  { id: 'lc-2', number: '7711 0002', owner: 'Самал Е.', phone: '+7 705 222 33 44', balance: 750 },
+  { id: 'lc-1', number: '7711 0001', owner: 'Данияр К.', phone: '+7 701 111 22 33', balance: 4200, deposit: 0 },
+  { id: 'lc-2', number: '7711 0002', owner: 'Самал Е.', phone: '+7 705 222 33 44', balance: 750, deposit: 15000 },
+]
+
+// Конструктор акций iikoCard (бонусная программа): начисление % + лимит оплаты + приветственный бонус.
+export const promoActionsSeed: PromoAction[] = [
+  { id: 'pa-accrue', name: 'Начисление 5% от заказа', type: 'accruePercent', active: true, percent: 5 },
+  { id: 'pa-limit', name: 'Оплата бонусами до 50% чека', type: 'paymentLimit', active: true, percent: 50 },
+  { id: 'pa-welcome', name: 'Приветственный бонус', type: 'welcome', active: true, amount: 1000 },
+]
+
+// Депозитная («Денежная») программа: денежный кошелёк гостя.
+export const depositProgramSeed: DepositProgram = { active: true }
+
+// Подарочные сертификаты (сертификатная программа).
+export const certificatesSeed: Certificate[] = [
+  { id: 'cert-1', number: 'GIFT-5000-AA', nominal: 5000, issuedAt: '2026-05-01', expiresAt: '2026-12-31', status: 'active', owner: 'Подарок' },
+  { id: 'cert-2', number: 'GIFT-10000-BB', nominal: 10000, issuedAt: '2026-04-15', expiresAt: '2026-10-15', status: 'active' },
 ]
 
 // Мотивационные программы (раздел 06) — начисление премии за личные продажи.
@@ -228,6 +244,20 @@ export const contractors: Contractor[] = [
   { id: 'c-meat', name: 'ТОО «Мясокомбинат Астана»', bin: '050340001234' },
   { id: 'c-veg', name: 'ИП Овощебаза', bin: '870101300555' },
   { id: 'c-drinks', name: 'ТОО «Напитки KZ»', bin: '120640002233' },
+]
+
+// Приходные накладные (входящие ЭСФ) — стартовый seed, чтобы бухгалтерия/закупки/проводки были «живыми».
+export const invoicesSeed: Invoice[] = [
+  {
+    id: 1, no: 'ПН-1001', date: addDaysISO(todayISO(), -5), supplierName: 'ТОО «Мясокомбинат Астана»', supplierBin: '050340001234',
+    lines: [{ ingredientId: 'i-lamb', name: 'Баранья рулька (п/ф)', qty: 5, price: 9000 }, { ingredientId: 'i-beef', name: 'Говядина', qty: 8, price: 4000 }],
+    total: 77000, vat: 10620.69, esfNo: 'ESF-KZ-100001', kind: 'in', store: 'Основной склад',
+  },
+  {
+    id: 2, no: 'ПН-1002', date: addDaysISO(todayISO(), -2), supplierName: 'ИП Овощебаза', supplierBin: '870101300555',
+    lines: [{ ingredientId: 'i-potato', name: 'Картофель', qty: 20, price: 350 }, { ingredientId: 'i-rice', name: 'Рис', qty: 10, price: 600 }, { ingredientId: 'i-flour', name: 'Мука', qty: 10, price: 300 }],
+    total: 16000, vat: 2206.90, esfNo: 'ESF-KZ-100002', kind: 'in', store: 'Основной склад',
+  },
 ]
 
 export const tablesByHall = (hallId: string) => tables.filter((t) => t.hallId === hallId)

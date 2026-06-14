@@ -11,7 +11,7 @@ type Mode = 'pin' | 'list' | 'card'
 
 export default function LoginScreen() {
   const navigate = useNavigate()
-  const { login, loginByCard, openPersonalShift, staffList, establishment } = usePos()
+  const { login, loginByCard, openPersonalShift, staffList, establishment, demoAuto } = usePos()
   const [mode, setMode] = useState<Mode>('pin')
   const [card, setCard] = useState('')
   const [cardErr, setCardErr] = useState('')
@@ -36,6 +36,8 @@ export default function LoginScreen() {
   }
 
   const choosePosition = (position: string) => { openPersonalShift(position); navigate('/menu') }
+  // быстрый вход (демо): логин по PIN + открытие личной смены на основной должности → сразу в меню
+  const quickLogin = (s: Staff) => { const u = login(s.pin); if (u) { openPersonalShift(u.positions[0]); navigate('/menu') } }
   const backToStart = () => { setPicked(null); setPin(''); setError(''); setCard(''); setCardErr('') }
   const switchMode = (m: Mode) => { setMode(m); backToStart() }
 
@@ -47,8 +49,11 @@ export default function LoginScreen() {
   }
 
   return (
-    <div className="h-full bg-pos-bg text-white flex items-center justify-center"
+    <div className="h-full bg-pos-bg text-white flex items-center justify-center relative"
          style={{ backgroundImage: 'linear-gradient(135deg,#3a3a3a,#1f1f1f)' }}>
+      {demoAuto && (
+        <div className="absolute top-3 right-3 text-[11px] font-semibold tracking-wide px-2 py-1 rounded bg-amber-400 text-amber-950">DEMO · данные мок</div>
+      )}
       {!authed ? (
         <div className="flex flex-col items-center gap-5">
           <div className="text-2xl font-light tracking-wide">iiko POS — вход</div>
@@ -111,6 +116,22 @@ export default function LoginScreen() {
               )}
               {picked && <button onClick={backToStart} className="text-sm text-gray-400 inline-flex items-center gap-1"><ChevronLeft size={14} /> к списку</button>}
             </>
+          )}
+
+          {/* быстрый вход по ролям (демо) — показать гейты прав без ввода PIN */}
+          {demoAuto && mode === 'pin' && !picked && (
+            <div className="w-[420px] mt-1">
+              <div className="text-[11px] uppercase tracking-wide text-white/40 mb-1.5 text-center">Быстрый вход (демо)</div>
+              <div className="grid grid-cols-2 gap-2">
+                {staffList.map((s) => (
+                  <button key={s.id} onClick={() => quickLogin(s)}
+                    className="h-12 rounded-md bg-white/10 hover:bg-white/20 px-3 flex items-center gap-2 text-left">
+                    <UserRound size={18} className="text-white/50 shrink-0" />
+                    <span className="min-w-0"><span className="block truncate text-sm">{s.name}</span><span className="block text-xs text-white/40 truncate">{s.positions[0]} · PIN {s.pin}</span></span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="flex items-center gap-4 mt-1">

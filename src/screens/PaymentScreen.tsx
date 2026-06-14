@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Menu, Lock, ChevronLeft, Banknote, CreditCard, Ban, MoreHorizontal, Gift, UtensilsCrossed, ReceiptText, Send, X } from 'lucide-react'
+import { Menu, Lock, ChevronLeft, Banknote, CreditCard, Ban, MoreHorizontal, Gift, Wallet, Ticket, UtensilsCrossed, ReceiptText, Send, X } from 'lucide-react'
 import { usePos, lineTotal } from '../store/pos'
 import { findTable } from '../mock/data'
+import { findDish } from '../mock/menu'
 import { formatTenge, vatBreakdown } from '../lib/money'
+import { redeemLimitPctOf, accrualFor } from '../lib/loyalty'
 import { printToast } from '../lib/print'
-import type { PaymentSplit, ClosedOrder, PaymentKind } from '../types'
+import type { PaymentSplit, ClosedOrder, PaymentKind, PaymentType } from '../types'
 
 // Экран оплаты заказа (ОПЛАТА ЗАКАЗА #N) — 1:1 с iikoFront:
 // слева состав по гостю + итоги, в центре «К оплате» + плитки оплат + внесено/внести/сдача,
@@ -33,20 +35,33 @@ export default function PaymentScreen() {
   const [prepaid, setPrepaid] = useState(false)
   const [showGoods, setShowGoods] = useState(false) // товарный (нефискальный) чек
 
+  const est = pos.establishment
   const paymentTypes = pos.paymentTypes
-  // iikoCard: привязанная карта гостя → добавляем вкладку «Бонусная карта» (списание бонусов)
+  // iikoCard: привязанная карта гостя → вкладки «Бонусы» (списание бонусов) и «Депозит» (кошелёк)
   const loyaltyCard = pos.loyaltyCards.find((c) => c.id === order?.loyaltyCardId)
-  const bonusActive = pos.loyaltyProgram.active && !!loyaltyCard && guestNo == null
+  const bonusActive = est.iikoCard && pos.loyaltyProgram.active && !!loyaltyCard && guestNo == null
   const bonusType = paymentTypes.find((p) => p.id === 'p-bonus')
-  const tabs = bonusActive && bonusType
-    ? [...paymentTypes.filter((p) => p.active && p.id !== 'p-bonus'), bonusType]
-    : paymentTypes.filter((p) => p.active)
-  const nameOf = (id: string) => paymentTypes.find((p) => p.id === id)?.name ?? ''
+  // синтетические типы оплаты iikoCard (нет в справочнике офиса): депозит-кошелёк и сертификат
+  const depositType: PaymentType = { id: 'p-deposit', name: 'Депозит (кошелёк)', kind: 'cashless' }
+  const certType: PaymentType = { id: 'p-cert', name: 'Сертификат', kind: 'cashless' }
+  const showDeposit = est.iikoCard && pos.depositProgram.active && !!loyaltyCard && loyaltyCard.deposit > 0 && guestNo == null
+  const showCert = est.iikoCard && guestNo == null
+  const tabs = [
+    ...paymentTypes.filter((p) => p.active && p.id !== 'p-bonus'),
+    ...(bonusActive && bonusType ? [bonusType] : []),
+    ...(showDeposit ? [depositType] : []),
+    ...(showCert ? [certType] : []),
+  ]
+  const allTypes = [...paymentTypes, depositType, certType]
+  const nameOf = (id: string) => allTypes.find((p) => p.id === id)?.name ?? ''
   const firstId = tabs[0]?.id ?? 'p-cash'
 
   const [lines, setLines] = useState<string[]>([firstId]) // типы оплат в работе
   const [active, setActive] = useState(firstId)
   const [entry, setEntry] = useState<Record<string, string>>({})
+  const [certNum, setCertNum] = useState('') // ввод номера сертификата
+  const [certApplied, setCertApplied] = useState<{ id: string; number: string; nominal: number } | null>(null)
+  const [certError, setCertError] = useState('')
 
   if (!order && !receipt) { navigate('/halls'); return null }
 
@@ -107,17 +122,27 @@ export default function PaymentScreen() {
   // ───────── расчёты ─────────
   const payLines = guestNo != null ? order!.lines.filter((l) => l.guestNo === guestNo) : order!.lines
   const sub = payLines.reduce((s, l) => s + lineTotal(l), 0)
-  const total = +(sub * (1 - order!.discountPct / 100) * (1 + order!.surchargePct / 100)).toFixed(2)
+  const afterPct = +(sub * (1 - order!.discountPct / 100) * (1 + order!.surchargePct / 100)).toFixed(2)
+  // фикс-сумма скидки на заказ применяется только к полному чеку (как в orderTotal/pay);
+  // при оплате по гостю скидка суммой не делится — payByGuest её тоже не учитывает
+  const total = guestNo != null ? afterPct : +Math.max(0, afterPct - (order!.discountAmount ?? 0)).toFixed(2)
   const amountOf = (id: string) => parseNum(entry[id])
   const paid = +lines.reduce((s, id) => s + amountOf(id), 0).toFixed(2)
   const prepay = guestNo != null ? 0 : +(order!.prepayment ?? 0).toFixed(2) // депозит/предоплата (для всего заказа)
   const due = Math.max(0, +(total - prepay).toFixed(2))     // к оплате гостем (за вычетом предоплаты)
   const toPayLeft = Math.max(0, +(due - paid).toFixed(2))   // «ВНЕСТИ»
   const change = Math.max(0, +(paid - due).toFixed(2))      // «СДАЧА»
-  // лимит оплаты бонусами: min(баланс карты, лимит % от чека)
-  const maxBonus = loyaltyCard ? +Math.min(loyaltyCard.balance, due * pos.loyaltyProgram.redeemLimitPct / 100).toFixed(2) : 0
+  // лимит оплаты бонусами: min(баланс карты, лимит % от чека) — лимит из конструктора акций
+  const redeemLimitPct = redeemLimitPctOf(pos.promoActions)
+  const maxBonus = loyaltyCard ? +Math.min(loyaltyCard.balance, due * redeemLimitPct / 100).toFixed(2) : 0
   const bonusEntered = +(amountOf('p-bonus')).toFixed(2)
   const bonusOver = bonusEntered > maxBonus + 0.01
+  // лимит оплаты с депозита-кошелька: min(остаток кошелька, к оплате)
+  const maxDeposit = loyaltyCard ? +Math.min(loyaltyCard.deposit, due).toFixed(2) : 0
+  const depositOver = +(amountOf('p-deposit')).toFixed(2) > maxDeposit + 0.01
+  // сертификат не может списать больше номинала
+  const certOver = !!certApplied && +(amountOf('p-cert')).toFixed(2) > certApplied.nominal + 0.01
+  const payBlocked = bonusOver || depositOver || certOver
   const fiscalSep = pos.establishment.fiscalBeforePay // 9.x: раздельная печать фискального чека перед оплатой
   const isFiscalized = order!.status === 'fiscalized'
 
@@ -144,24 +169,46 @@ export default function PaymentScreen() {
     .filter((id) => amountOf(id) > 0)
     .map((id) => ({ paymentTypeId: id, name: nameOf(id), amount: amountOf(id) }))
 
+  // применить сертификат: проверить статус/срок и заполнить сумму к оплате (в пределах номинала)
+  const applyCert = () => {
+    const q = certNum.replace(/\s/g, '').toLowerCase()
+    const c = pos.certificates.find((x) => x.number.replace(/\s/g, '').toLowerCase() === q)
+    if (!c) { setCertError('Сертификат не найден'); return }
+    if (c.status !== 'active') { setCertError(c.status === 'used' ? 'Сертификат уже погашен' : 'Сертификат просрочен'); return }
+    setCertError('')
+    setCertApplied({ id: c.id, number: c.number, nominal: c.nominal })
+    setLines((ls) => (ls.includes('p-cert') ? ls : [...ls, 'p-cert']))
+    const fill = +Math.min(c.nominal, Math.max(0, due - (paid - amountOf('p-cert')))).toFixed(2)
+    setEntry((e) => ({ ...e, 'p-cert': String(fill) }))
+    setActive('p-cert')
+  }
+
   const doPay = () => {
-    if (bonusOver) { alert(`Бонусами можно оплатить не более ${formatTenge(maxBonus)}`); return }
+    if (payBlocked) { alert(`Проверьте суммы: бонусы ≤ ${formatTenge(maxBonus)}, депозит ≤ ${formatTenge(maxDeposit)}, сертификат ≤ номинала`); return }
     const tenders = splitsNow()
     // предоплата/депозит идёт отдельной строкой оплаты, чтобы сумма платежей сошлась с итогом
     const splits = prepay > 0 ? [...tenders, { paymentTypeId: 'p-prepay', name: 'Предоплата', amount: prepay }] : tenders
     if (splits.length === 0) return
     const used = paymentTypes.filter((p) => tenders.some((s) => s.paymentTypeId === p.id))
     const bonusUsed = +(tenders.find((s) => s.paymentTypeId === 'p-bonus')?.amount ?? 0).toFixed(2)
+    const depositUsed = +(tenders.find((s) => s.paymentTypeId === 'p-deposit')?.amount ?? 0).toFixed(2)
+    const certUsed = +(tenders.find((s) => s.paymentTypeId === 'p-cert')?.amount ?? 0).toFixed(2)
     const moneyPaid = +(tenders.filter((s) => s.paymentTypeId !== 'p-bonus').reduce((s, p) => s + p.amount, 0)).toFixed(2)
     const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid + prepay) : pos.pay(splits, paid + prepay)
     if (closed) {
       if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
       if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
       if (order!.type === 'delivery') printToast(`Доставка${courier ? ` · курьер ${courier}` : ''} · ${prepaid ? 'предоплачено' : 'оплата при получении'}`)
-      // iikoCard: списание бонусов + начисление % от оплаченного деньгами
+      // iikoCard: списание с кошелька (депозит)
+      if (depositUsed > 0 && loyaltyCard) { pos.adjustDeposit(loyaltyCard.id, -depositUsed); printToast(`Депозит · ${loyaltyCard.owner} · списано ${formatTenge(depositUsed)} (остаток ${formatTenge(loyaltyCard.deposit - depositUsed)})`) }
+      // iikoCard: погашение сертификата
+      if (certUsed > 0 && certApplied) { pos.redeemCertificate(certApplied.id); printToast(`Сертификат ${certApplied.number} погашён на ${formatTenge(certUsed)}`) }
+      // iikoCard: списание бонусов + начисление по акциям (от оплаты не-бонусами)
       if (loyaltyCard) {
-        const accrued = Math.round(Math.min(moneyPaid, closed.total) * pos.loyaltyProgram.accrualPct / 100)
-        pos.adjustBonus(loyaltyCard.id, accrued - bonusUsed)
+        const groupSumOf = (gid: string) => payLines.filter((l) => findDish(l.dishId)?.groupId === gid).reduce((s, l) => s + lineTotal(l), 0)
+        const baseAccrual = accrualFor(pos.promoActions, closed.total, groupSumOf)
+        const accrued = Math.round(baseAccrual * Math.min(moneyPaid, closed.total) / (closed.total || 1))
+        if (accrued !== 0 || bonusUsed !== 0) pos.adjustBonus(loyaltyCard.id, accrued - bonusUsed)
         printToast(`iikoCard · ${loyaltyCard.owner}${bonusUsed > 0 ? ` · списано ${formatTenge(bonusUsed)}` : ''} · начислено ${formatTenge(accrued)} бонусов`)
       }
       setReceipt(closed)
@@ -217,6 +264,7 @@ export default function PaymentScreen() {
             <Tot k="ПОДЫТОГ" v={formatTenge(sub)} />
             <Tot k="СКИДКА" v={`${order!.discountPct.toFixed(2)}%`} />
             <Tot k="НАДБАВКА" v={`${order!.surchargePct.toFixed(2)}%`} />
+            {guestNo == null && order!.discountAmount ? <Tot k="СКИДКА СУММОЙ" v={'− ' + formatTenge(order!.discountAmount)} /> : null}
             <Tot k="ПРЕДОПЛАТА" v={prepay > 0 ? '− ' + formatTenge(prepay) : formatTenge(0)} />
             <div className="flex justify-between px-4 py-2 text-2xl font-bold border-t border-black/30"><span>ИТОГО:</span><span>{formatTenge(total)}</span></div>
           </div>
@@ -288,7 +336,7 @@ export default function PaymentScreen() {
         <div className="flex-1 flex flex-col bg-pos-bg">
           <div className="grid shrink-0" style={{ gridTemplateColumns: `repeat(${Math.max(1, tabs.length)}, minmax(0,1fr))` }}>
             {tabs.map((pt) => {
-              const Icon = ICON_BY_KIND[pt.kind] ?? MoreHorizontal
+              const Icon = pt.id === 'p-deposit' ? Wallet : pt.id === 'p-cert' ? Ticket : (ICON_BY_KIND[pt.kind] ?? MoreHorizontal)
               return (
                 <button key={pt.id} onClick={() => selectTab(pt.id)}
                   className={`h-20 flex flex-col items-center justify-center gap-1 border-r border-black/20 ${active === pt.id ? 'bg-pos-accent text-gray-900' : 'bg-[#6d7479] text-white'}`}>
@@ -301,8 +349,30 @@ export default function PaymentScreen() {
           <div className="text-center text-5xl font-light py-4">{formatTenge(amountOf(active))}</div>
           {active === 'p-bonus' && loyaltyCard && (
             <div className="text-center text-sm pb-2">
-              <div className={bonusOver ? 'text-pos-rose' : 'text-white/60'}>Доступно бонусами: {formatTenge(maxBonus)} (баланс {formatTenge(loyaltyCard.balance)}, лимит {pos.loyaltyProgram.redeemLimitPct}%)</div>
+              <div className={bonusOver ? 'text-pos-rose' : 'text-white/60'}>Доступно бонусами: {formatTenge(maxBonus)} (баланс {formatTenge(loyaltyCard.balance)}, лимит {redeemLimitPct}%)</div>
               <button onClick={() => setActiveEntry(String(maxBonus))} className="mt-1 h-8 px-3 rounded bg-white/15 text-white text-xs">Списать максимум</button>
+            </div>
+          )}
+          {active === 'p-deposit' && loyaltyCard && (
+            <div className="text-center text-sm pb-2">
+              <div className={depositOver ? 'text-pos-rose' : 'text-white/60'}>Кошелёк: {formatTenge(loyaltyCard.deposit)} · к списанию ≤ {formatTenge(maxDeposit)}</div>
+              <button onClick={() => setActiveEntry(String(maxDeposit))} className="mt-1 h-8 px-3 rounded bg-white/15 text-white text-xs">Списать максимум</button>
+            </div>
+          )}
+          {active === 'p-cert' && (
+            <div className="px-6 pb-2">
+              {certApplied ? (
+                <div className={`text-center text-sm ${certOver ? 'text-pos-rose' : 'text-white/60'}`}>
+                  Сертификат {certApplied.number} · номинал {formatTenge(certApplied.nominal)}
+                  <button onClick={() => { setCertApplied(null); removeLine('p-cert'); setCertNum('') }} className="ml-2 h-7 px-2 rounded bg-white/15 text-white text-xs">Сбросить</button>
+                </div>
+              ) : (
+                <form onSubmit={(e) => { e.preventDefault(); applyCert() }} className="flex gap-2 justify-center">
+                  <input value={certNum} onChange={(e) => setCertNum(e.target.value)} placeholder="Номер сертификата" className="h-9 w-48 rounded px-2 text-gray-800 text-sm" />
+                  <button type="submit" className="h-9 px-3 rounded bg-pos-accent text-gray-900 text-sm">Применить</button>
+                </form>
+              )}
+              {certError && <div className="text-center text-pos-rose text-xs mt-1">{certError}</div>}
             </div>
           )}
 
@@ -331,12 +401,12 @@ export default function PaymentScreen() {
         <BarBtn onClick={() => setShowGoods(true)} Icon={ReceiptText} label="С ТОВАРНЫМ ЧЕКОМ" />
         <BarBtn onClick={() => printToast('Чек отправлен')} Icon={Send} label="ОТПРАВКА ЧЕКА" />
         {!fiscalSep ? (
-          <button onClick={doPay} disabled={paid < due || total <= 0 || bonusOver}
+          <button onClick={doPay} disabled={paid < due || total <= 0 || payBlocked}
             className={`ml-auto h-12 px-12 rounded-md text-2xl font-light ${paid >= due && total > 0 ? 'text-white active:bg-white/10' : 'text-white/30'}`}>
             ОПЛАТИТЬ
           </button>
         ) : !isFiscalized ? (
-          <button onClick={doFiscal} disabled={paid < due || total <= 0 || bonusOver}
+          <button onClick={doFiscal} disabled={paid < due || total <= 0 || payBlocked}
             className={`ml-auto h-12 px-10 rounded-md text-xl font-light ${paid >= due && total > 0 ? 'bg-pos-accent text-gray-900' : 'text-white/30'}`}>
             ФИСКАЛЬНЫЙ ЧЕК
           </button>

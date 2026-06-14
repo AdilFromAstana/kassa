@@ -4,6 +4,8 @@ import { usePos } from '../store/pos'
 import { dishes } from '../mock/menu'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
+import InputModal from '../components/InputModal'
+import Tabs from '../components/Tabs'
 import type { DeliveryStatus, DeliveryItem } from '../types'
 
 // Доставка (модуль 14, iikoDelivery) — заказы с жизненным циклом + клиенты, курьеры, справочники, отчёт.
@@ -35,6 +37,7 @@ export default function OfficeDelivery() {
   const [newCust, setNewCust] = useState({ name: '', phone: '', street: '', house: '', apt: '', district: '', adSource: 'Сайт', comment: '' })
   const [newCourier, setNewCourier] = useState('')
   const [newRef, setNewRef] = useState({ city: '', street: '', district: '' })
+  const [cancelId, setCancelId] = useState<number | null>(null) // тач-модалка причины отмены
 
   const s = pos.deliverySettings
   const courierName = (id?: string) => pos.couriers.find((c) => c.id === id)?.name ?? '—'
@@ -63,7 +66,7 @@ export default function OfficeDelivery() {
   // действия жизненного цикла (0)…(5)
   const advance = (id: number, to: DeliveryStatus) => pos.setDeliveryStatus(id, to)
   const onSend = (o: { id: number; type: 'courier' | 'pickup' }) => { if (o.type === 'pickup') advance(o.id, 'delivered'); else setAssignFor(o.id) }
-  const doCancel = (id: number) => { const r = window.prompt('Причина отмены доставки:', 'Отказ клиента'); if (r != null) pos.cancelDelivery(id, r || 'Без причины') }
+  const doCancel = (id: number) => setCancelId(id)
 
   const Stepper = ({ o }: { o: { id: number; status: DeliveryStatus; type: 'courier' | 'pickup' } }) => {
     if (o.status === 'cancelled' || o.status === 'closed') return null
@@ -87,12 +90,9 @@ export default function OfficeDelivery() {
         Доставка (iikoDelivery, модуль 14). Жизненный цикл заказа: Принят → Подтверждён → Готовится → В пути → Доставлен → Закрыт.
         Курьеру назначается только заказ в статусе «Готовится» (кнопка «Отправить»); курьер должен быть на смене.
       </div>
-      <div className="flex gap-1 mb-4 border-b border-gray-200">
-        {([['orders', 'Заказы'], ['customers', 'Клиенты'], ['couriers', 'Курьеры'], ['refs', 'Справочники / настройки'], ['reports', 'Отчёты']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-4 h-10 text-sm -mb-px border-b-2 ${tab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-        ))}
-      </div>
+      <Tabs active={tab} onChange={setTab} items={[
+        { id: 'orders', label: 'Заказы' }, { id: 'customers', label: 'Клиенты' }, { id: 'couriers', label: 'Курьеры' }, { id: 'refs', label: 'Справочники / настройки' }, { id: 'reports', label: 'Отчёты' },
+      ]} />
 
       {tab === 'orders' && (
         <>
@@ -289,6 +289,13 @@ export default function OfficeDelivery() {
             <button onClick={() => setAssignFor(null)} className="mt-4 h-10 w-full rounded-md bg-gray-200">Отмена</button>
           </div>
         </div>
+      )}
+      {cancelId != null && (
+        <InputModal title="Отмена доставки" desc={`Заказ доставки №${cancelId}`}
+          fields={[{ key: 'reason', label: 'Причина отмены', placeholder: 'Отказ клиента', default: 'Отказ клиента' }]}
+          okLabel="Отменить заказ"
+          onOk={(v) => { pos.cancelDelivery(cancelId, v.reason.trim() || 'Без причины'); printToast(`Доставка №${cancelId} отменена`); setCancelId(null) }}
+          onCancel={() => setCancelId(null)} />
       )}
     </div>
   )

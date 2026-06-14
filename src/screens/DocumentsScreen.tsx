@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BackButton from '../components/BackButton'
 import TopBar from '../components/TopBar'
+import Modal from '../components/Modal'
 import { usePos } from '../store/pos'
 import { warehouses } from '../mock/data'
 import { formatTenge } from '../lib/money'
@@ -26,8 +27,13 @@ export default function DocumentsScreen() {
   const [resultId, setResultId] = useState(ingredients[0]?.id ?? '')
   const [resultQty, setResultQty] = useState('')
   const [viewDoc, setViewDoc] = useState<StoreDoc | null>(null) // открытый документ из истории
+  // мастер инвентаризации (3 шага: склад+позиции → факт.остатки → сверка)
+  const [invStep, setInvStep] = useState<1 | 2 | 3>(1)
+  const [invStore, setInvStore] = useState(warehouses[0])
+  const [invSel, setInvSel] = useState<Record<string, boolean>>({})
+  const [invFact, setInvFact] = useState<Record<string, string>>({})
 
-  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty('') }
+  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty(''); setInvStep(1); setInvSel({}); setInvFact({}) }
   const isInv = type === 'Инвентаризация'
   const isWriteoff = type === 'Акт списания'
   const isTransfer = type === 'Внутреннее перемещение'
@@ -60,6 +66,20 @@ export default function DocumentsScreen() {
   }
 
   const lineCost = (l: DocLine) => (ingredients.find((i) => i.id === l.ingredientId)?.costPerUnit ?? 0) * l.qty
+
+  // ── мастер инвентаризации ──
+  const invIngredients = ingredients.filter((i) => (i.store ?? warehouses[0]) === invStore)
+  const invChosen = invIngredients.filter((i) => invSel[i.id])
+  const factOf = (id: string) => { const v = parseFloat((invFact[id] ?? '').replace(',', '.')); return isNaN(v) ? 0 : v }
+  const toggleAll = (on: boolean) => setInvSel(Object.fromEntries(invIngredients.map((i) => [i.id, on])))
+  const doInventory = () => {
+    const invLines: DocLine[] = invChosen.map((i) => ({ ingredientId: i.id, name: i.name, unit: i.unit, qty: factOf(i.id), booked: i.stock }))
+    if (invLines.length === 0) return
+    const doc = createStoreDoc('Инвентаризация', invLines, { store: invStore })
+    const devCost = invChosen.reduce((s, i) => s + (factOf(i.id) - i.stock) * i.costPerUnit, 0)
+    printToast(`Инвентаризация №${doc.id} проведена · ${invStore} · позиций: ${invLines.length} · отклонение ${formatTenge(devCost)}`)
+    reset()
+  }
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
@@ -96,6 +116,101 @@ export default function DocumentsScreen() {
             )}
             {documents.length > 0 && <div className="text-white/40 text-xs mt-2">Нажмите документ, чтобы открыть и распечатать.</div>}
           </>
+        ) : isInv ? (
+          <div className="max-w-3xl">
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={reset} className="text-white/60 hover:text-white">‹ к типам</button>
+              <div className="text-lg">Инвентаризация</div>
+              <div className="ml-auto flex items-center gap-2 text-sm">
+                {([[1, 'Склад и позиции'], [2, 'Факт. остатки'], [3, 'Сверка']] as const).map(([n, label]) => (
+                  <span key={n} className={`flex items-center gap-1 ${invStep === n ? 'text-pos-accent' : invStep > n ? 'text-pos-green' : 'text-white/40'}`}>
+                    <span className={`w-5 h-5 rounded-full grid place-items-center text-xs ${invStep === n ? 'bg-pos-accent text-gray-900' : invStep > n ? 'bg-pos-green text-white' : 'bg-white/10'}`}>{n}</span>{label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* ШАГ 1 — склад + выбор позиций */}
+            {invStep === 1 && (
+              <>
+                <label className="block mb-3 max-w-xs">
+                  <div className="text-white/60 text-sm mb-1">Склад</div>
+                  <select value={invStore} onChange={(e) => { setInvStore(e.target.value); setInvSel({}) }} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
+                    {warehouses.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </label>
+                <div className="flex items-center gap-3 mb-2 text-sm">
+                  <span className="text-white/60">Позиции к пересчёту ({invChosen.length}/{invIngredients.length})</span>
+                  <button onClick={() => toggleAll(true)} className="h-7 px-2 rounded bg-white/10 hover:bg-white/20">Выбрать все</button>
+                  <button onClick={() => toggleAll(false)} className="h-7 px-2 rounded bg-white/10 hover:bg-white/20">Снять все</button>
+                </div>
+                <div className="bg-white/5 rounded-lg overflow-hidden mb-4 max-h-80 overflow-y-auto">
+                  {invIngredients.length === 0 ? <div className="p-3 text-white/40 text-sm">На складе «{invStore}» нет позиций.</div> : invIngredients.map((i) => (
+                    <label key={i.id} className="flex items-center gap-3 px-3 py-2 border-b border-white/10 cursor-pointer hover:bg-white/5">
+                      <input type="checkbox" checked={!!invSel[i.id]} onChange={(e) => setInvSel((s) => ({ ...s, [i.id]: e.target.checked }))} />
+                      <span className="flex-1">{i.name}</span>
+                      <span className="text-white/40 text-sm">учётный {i.stock} {i.unit}</span>
+                    </label>
+                  ))}
+                </div>
+                <button onClick={() => setInvStep(2)} disabled={invChosen.length === 0}
+                  className={`h-11 px-6 rounded-md font-semibold ${invChosen.length ? 'bg-pos-blue text-white' : 'bg-gray-600 text-white/40'}`}>Далее → факт. остатки</button>
+              </>
+            )}
+
+            {/* ШАГ 2 — ввод фактических остатков */}
+            {invStep === 2 && (
+              <>
+                <div className="text-white/60 text-sm mb-2">Склад «{invStore}» · введите фактический остаток по каждой позиции</div>
+                <div className="bg-white/5 rounded-lg overflow-hidden mb-4">
+                  <div className="flex items-center gap-3 px-3 py-2 text-xs text-white/40 border-b border-white/10"><span className="flex-1">Товар</span><span className="w-28 text-right">Учётный</span><span className="w-36 text-right">Факт</span></div>
+                  {invChosen.map((i) => (
+                    <div key={i.id} className="flex items-center gap-3 px-3 py-2 border-b border-white/10">
+                      <span className="flex-1">{i.name}</span>
+                      <span className="w-28 text-right text-white/50">{i.stock} {i.unit}</span>
+                      <input value={invFact[i.id] ?? ''} onChange={(e) => setInvFact((f) => ({ ...f, [i.id]: e.target.value }))} inputMode="decimal" placeholder={String(i.stock)}
+                        className="w-36 h-10 rounded-md px-3 bg-white text-gray-800 text-right" />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setInvStep(1)} className="h-11 px-5 rounded-md bg-white/10">← Назад</button>
+                  <button onClick={() => setInvStep(3)} className="h-11 px-6 rounded-md bg-pos-blue text-white font-semibold">Далее → сверка</button>
+                </div>
+              </>
+            )}
+
+            {/* ШАГ 3 — сверка и проведение */}
+            {invStep === 3 && (() => {
+              const devCost = invChosen.reduce((s, i) => s + (factOf(i.id) - i.stock) * i.costPerUnit, 0)
+              return (
+                <>
+                  <div className="text-white/60 text-sm mb-2">Сверка · склад «{invStore}»</div>
+                  <div className="bg-white/5 rounded-lg overflow-hidden mb-4">
+                    <div className="flex items-center gap-3 px-3 py-2 text-xs text-white/40 border-b border-white/10"><span className="flex-1">Товар</span><span className="w-24 text-right">Учётный</span><span className="w-24 text-right">Факт</span><span className="w-24 text-right">Откл.</span><span className="w-28 text-right">Откл. ₸</span></div>
+                    {invChosen.map((i) => {
+                      const dev = +(factOf(i.id) - i.stock).toFixed(3)
+                      return (
+                        <div key={i.id} className="flex items-center gap-3 px-3 py-2 border-b border-white/10">
+                          <span className="flex-1">{i.name}</span>
+                          <span className="w-24 text-right text-white/50">{i.stock} {i.unit}</span>
+                          <span className="w-24 text-right">{factOf(i.id)} {i.unit}</span>
+                          <span className={`w-24 text-right ${dev === 0 ? 'text-white/40' : dev < 0 ? 'text-pos-rose' : 'text-pos-green'}`}>{dev > 0 ? '+' : ''}{dev}</span>
+                          <span className={`w-28 text-right ${dev === 0 ? 'text-white/40' : dev < 0 ? 'text-pos-rose' : 'text-pos-green'}`}>{formatTenge(dev * i.costPerUnit)}</span>
+                        </div>
+                      )
+                    })}
+                    <div className="flex items-center gap-3 px-3 py-2 font-semibold"><span className="flex-1">Итого отклонение</span><span className={devCost === 0 ? 'text-white/60' : devCost < 0 ? 'text-pos-rose' : 'text-pos-green'}>{formatTenge(devCost)}</span></div>
+                  </div>
+                  <div className="text-white/40 text-xs mb-3">Проведение выставит учётные остатки равными фактическим (как в iikoFront).</div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setInvStep(2)} className="h-11 px-5 rounded-md bg-white/10">← Назад</button>
+                    <button onClick={doInventory} className="h-11 px-6 rounded-md bg-pos-green text-white font-semibold">Провести инвентаризацию</button>
+                  </div>
+                </>
+              )
+            })()}
+          </div>
         ) : (
           <div className="max-w-2xl">
             <div className="flex items-center gap-3 mb-4">
@@ -214,8 +329,7 @@ export default function DocumentsScreen() {
         const isInvDoc = d.type === 'Инвентаризация'
         const total = d.lines.reduce((s, l) => s + (ingredients.find((i) => i.id === l.ingredientId)?.costPerUnit ?? 0) * l.qty, 0)
         return (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setViewDoc(null)}>
-            <div className="bg-white text-gray-800 rounded-lg w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <Modal onClose={() => setViewDoc(null)} width="w-full max-w-lg" className="max-h-[85vh] flex flex-col">
               <div className="px-5 py-3 border-b flex items-center">
                 <div>
                   <div className="font-semibold">{d.type} №{d.id}</div>
@@ -270,8 +384,7 @@ export default function DocumentsScreen() {
                 <button onClick={() => printToast(`${d.type} №${d.id} распечатан · позиций: ${d.lines.length}`)}
                   className="h-11 px-6 rounded-md bg-pos-blue text-white">Печать</button>
               </div>
-            </div>
-          </div>
+          </Modal>
         )
       })()}
     </div>

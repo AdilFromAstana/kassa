@@ -7,7 +7,7 @@ import TopBar from '../components/TopBar'
 // Дополнения / Инструменты (нижняя панель доп. меню) — служебные разделы.
 const ADDONS = [
   { label: 'iikoDelivery (доставка)', note: 'модуль доставки' },
-  { label: 'iikoCard (лояльность)', note: 'бонусы и карты' },
+  { label: 'iikoCard (лояльность)', note: 'бонусы · депозит · сертификаты' },
   { label: 'Кухонный экран (KDS)', note: 'экран повара' },
   { label: 'Электронное меню (QR)', note: 'заказ со стола' },
   { label: 'Видеонаблюдение', note: 'привязка чеков к видео' },
@@ -22,7 +22,7 @@ const TOOLS = [
 export default function ExtrasScreen() {
   const navigate = useNavigate()
   const [sp] = useSearchParams()
-  const { establishment } = usePos()
+  const { establishment, demoAuto, seedDemo, clearDemo, setDemoAuto, closedOrders } = usePos()
   const kind = sp.get('kind') === 'tools' ? 'tools' : 'addons'
   const items = kind === 'tools' ? TOOLS : ADDONS
   const title = kind === 'tools' ? 'Инструменты' : 'Дополнения'
@@ -45,6 +45,26 @@ export default function ExtrasScreen() {
               <div className="text-pos-accent text-sm uppercase mb-1">Настройки заведения (из офиса) ›</div>
               <div className="text-xs text-white/50">Тип ({establishment.mode === 'restaurant' ? 'Ресторан' : 'Фастфуд'}), функции, число ФР — только просмотр; редактируется в Бэк-офисе.</div>
             </button>
+          </div>
+        )}
+
+        {/* Демо-данные (мок) — наполнение/сброс для показа без бэка */}
+        {kind === 'tools' && (
+          <div className="mb-5 max-w-3xl w-full bg-white/5 rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-pos-accent text-sm uppercase">Демо-данные (мок)</div>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-400 text-amber-950 font-semibold">{demoAuto ? 'ВКЛ' : 'ВЫКЛ'}</span>
+              <span className="ml-auto text-xs text-white/40">в текущей смене: {closedOrders.length} чеков</span>
+            </div>
+            <div className="text-xs text-white/50 mb-3">Наполнение кассы/офиса данными рабочего дня для показа. Реальные действия сохраняются и перетирают демо.</div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => { seedDemo(); printToast('Сгенерирован рабочий день (заказы, оплаты, отчёты)') }}
+                className="h-10 px-4 rounded-md bg-pos-green text-white text-sm">Сгенерировать день</button>
+              <button onClick={() => { clearDemo(); printToast('Демо-данные очищены (касса пустая)') }}
+                className="h-10 px-4 rounded-md bg-white/10 hover:bg-white/20 text-sm">Очистить</button>
+              <button onClick={() => { setDemoAuto(!demoAuto); printToast(demoAuto ? 'Авто-наполнение выключено' : 'Авто-наполнение включено (при запуске)') }}
+                className="h-10 px-4 rounded-md bg-white/10 hover:bg-white/20 text-sm">{demoAuto ? 'Выключить авто-наполнение' : 'Включить авто-наполнение'}</button>
+            </div>
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 max-w-3xl">

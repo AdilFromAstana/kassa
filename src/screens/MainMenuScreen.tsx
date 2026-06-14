@@ -94,6 +94,7 @@ export default function MainMenuScreen() {
             <Tile c={{ label: 'Отчеты', onClick: () => navigate('/reports'), disabled: !pos.can('F_VRPT') }} />
             <Tile c={{ label: 'Стоп-лист', onClick: () => navigate('/stoplist') }} />
             <Tile c={{ label: 'Документы', onClick: () => navigate('/documents') }} />
+            {est.kitchenScreen && <Tile c={{ label: 'Кухонный экран (KDS)', onClick: () => navigate('/kitchen'), accent: true }} />}
           </div>
         </div>
 

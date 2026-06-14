@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { Trash2, Building2, Boxes, Store, Warehouse } from 'lucide-react'
+import { Trash2, Building2, Boxes, Store, Warehouse, Plus } from 'lucide-react'
 import { usePos } from '../store/pos'
-import { corpTreeSeed } from '../mock/data'
 import { printToast } from '../lib/print'
-import type { SyncPoint } from '../types'
+import Tabs from '../components/Tabs'
+import type { SyncPoint, CorpTree } from '../types'
+
+const cloneTree = (t: CorpTree): CorpTree => JSON.parse(JSON.stringify(t))
+const uid = (p: string) => p + '-' + Math.random().toString(36).slice(2, 8)
 
 // Корпорация (модуль 02) — структура сети, общие настройки, нумерация документов, концепции, монитор синхронизации.
 type Tab = 'structure' | 'numbering' | 'concepts' | 'sync'
@@ -20,35 +23,63 @@ export default function OfficeCorp() {
   const [tab, setTab] = useState<Tab>('structure')
   const [newCn, setNewCn] = useState({ code: '', name: '', group: '' })
   const c = pos.corpSettings
+  const tree = pos.corpTree
+  // CRUD структуры: считаем новое дерево в компоненте и сохраняем целиком (store.setCorpTree)
+  const commit = (mut: (t: CorpTree) => void) => { const t = cloneTree(tree); mut(t); pos.setCorpTree(t) }
+  const eInput = 'h-8 rounded border border-transparent hover:border-gray-200 focus:border-emerald-400 px-1 bg-transparent focus:bg-white outline-none'
 
   return (
     <div className="p-6 max-w-4xl">
       <div className="text-xs text-gray-500 mb-4">Корпорация (модуль 02) — структура сети, общие настройки учёта, нумерация документов, концепции, монитор синхронизации ЦО↔ТП.</div>
-      <div className="flex gap-1 mb-4 border-b border-gray-200">
-        {([['structure', 'Структура и настройки'], ['numbering', 'Нумерация документов'], ['concepts', 'Концепции'], ['sync', 'Монитор синхронизации']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={`px-4 h-10 text-sm -mb-px border-b-2 ${tab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
-        ))}
-      </div>
+      <Tabs active={tab} onChange={setTab} items={[
+        { id: 'structure', label: 'Структура и настройки' }, { id: 'numbering', label: 'Нумерация документов' }, { id: 'concepts', label: 'Концепции' }, { id: 'sync', label: 'Монитор синхронизации' },
+      ]} />
 
       {tab === 'structure' && (
         <div className="grid grid-cols-2 gap-4">
-          {/* дерево структуры сети */}
+          {/* дерево структуры сети — редактируемый CRUD */}
           <div className="bg-white border border-gray-200 rounded-md p-4">
-            <div className="text-gray-500 text-xs uppercase mb-3">Структура сети</div>
+            <div className="flex items-center mb-3">
+              <div className="text-gray-500 text-xs uppercase">Структура сети</div>
+              <button onClick={() => commit((t) => t.legal.push({ id: uid('le'), name: 'Новое юрлицо', bin: '', divisions: [] }))}
+                className="ml-auto h-7 px-2 rounded bg-emerald-500 text-white text-xs flex items-center gap-1"><Plus size={13} />Юрлицо</button>
+            </div>
             <div className="text-sm">
-              <div className="flex items-center gap-2 font-medium"><Building2 size={15} className="text-emerald-600" />{corpTreeSeed.name}</div>
-              {corpTreeSeed.legal.map((le) => (
-                <div key={le.name} className="ml-4 mt-1">
-                  <div className="flex items-center gap-2"><Boxes size={14} className="text-slate-500" />{le.name} <span className="text-xs text-gray-400">БИН {le.bin}</span></div>
+              <div className="flex items-center gap-2 font-medium">
+                <Building2 size={15} className="text-emerald-600 shrink-0" />
+                <input value={tree.name} onChange={(e) => commit((t) => { t.name = e.target.value })} className={`${eInput} flex-1 font-medium`} />
+              </div>
+              {tree.legal.map((le) => (
+                <div key={le.id} className="ml-3 mt-1 border-l border-gray-100 pl-2">
+                  <div className="flex items-center gap-1 group">
+                    <Boxes size={14} className="text-slate-500 shrink-0" />
+                    <input value={le.name} onChange={(e) => commit((t) => { const x = t.legal.find((y) => y.id === le.id); if (x) x.name = e.target.value })} className={`${eInput} flex-1`} />
+                    <input value={le.bin} onChange={(e) => commit((t) => { const x = t.legal.find((y) => y.id === le.id); if (x) x.bin = e.target.value.replace(/\D/g, '').slice(0, 12) })} placeholder="БИН" className={`${eInput} w-28 text-xs font-mono text-gray-500`} />
+                    <button onClick={() => commit((t) => { const dv = t.legal.find((y) => y.id === le.id)?.divisions; if (dv) dv.push({ id: uid('dv'), name: 'Подразделение', points: [] }) })} className="opacity-0 group-hover:opacity-100 text-emerald-600" title="Добавить подразделение"><Plus size={14} /></button>
+                    <button onClick={() => commit((t) => { t.legal = t.legal.filter((y) => y.id !== le.id) })} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={13} /></button>
+                  </div>
                   {le.divisions.map((dv) => (
-                    <div key={dv.name} className="ml-4 mt-1">
-                      <div className="flex items-center gap-2 text-gray-700"><Boxes size={13} className="text-slate-400" />{dv.name}</div>
+                    <div key={dv.id} className="ml-4 mt-1 border-l border-gray-100 pl-2">
+                      <div className="flex items-center gap-1 group">
+                        <Boxes size={13} className="text-slate-400 shrink-0" />
+                        <input value={dv.name} onChange={(e) => commit((t) => { const x = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id); if (x) x.name = e.target.value })} className={`${eInput} flex-1 text-gray-700`} />
+                        <button onClick={() => commit((t) => { const pts = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id)?.points; if (pts) pts.push({ id: uid('pt'), name: 'Торговое предприятие', warehouses: [] }) })} className="opacity-0 group-hover:opacity-100 text-emerald-600" title="Добавить ТП"><Plus size={14} /></button>
+                        <button onClick={() => commit((t) => { const x = t.legal.find((y) => y.id === le.id); if (x) x.divisions = x.divisions.filter((z) => z.id !== dv.id) })} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={13} /></button>
+                      </div>
                       {dv.points.map((p) => (
-                        <div key={p.name} className="ml-4 mt-1">
-                          <div className="flex items-center gap-2 text-gray-700"><Store size={13} className="text-blue-500" />{p.name}</div>
+                        <div key={p.id} className="ml-4 mt-1 border-l border-gray-100 pl-2">
+                          <div className="flex items-center gap-1 group">
+                            <Store size={13} className="text-blue-500 shrink-0" />
+                            <input value={p.name} onChange={(e) => commit((t) => { const x = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id)?.points.find((q) => q.id === p.id); if (x) x.name = e.target.value })} className={`${eInput} flex-1 text-gray-700`} />
+                            <button onClick={() => commit((t) => { const whs = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id)?.points.find((q) => q.id === p.id)?.warehouses; if (whs) whs.push({ id: uid('wh'), name: 'Склад' }) })} className="opacity-0 group-hover:opacity-100 text-emerald-600" title="Добавить склад"><Plus size={14} /></button>
+                            <button onClick={() => commit((t) => { const x = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id); if (x) x.points = x.points.filter((q) => q.id !== p.id) })} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={13} /></button>
+                          </div>
                           {p.warehouses.map((w) => (
-                            <div key={w} className="ml-5 flex items-center gap-2 text-gray-500 text-xs"><Warehouse size={11} />{w}</div>
+                            <div key={w.id} className="ml-5 flex items-center gap-1 group text-gray-500 text-xs">
+                              <Warehouse size={11} className="shrink-0" />
+                              <input value={w.name} onChange={(e) => commit((t) => { const x = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id)?.points.find((q) => q.id === p.id)?.warehouses.find((u) => u.id === w.id); if (x) x.name = e.target.value })} className={`${eInput} flex-1 text-xs`} />
+                              <button onClick={() => commit((t) => { const x = t.legal.find((y) => y.id === le.id)?.divisions.find((z) => z.id === dv.id)?.points.find((q) => q.id === p.id); if (x) x.warehouses = x.warehouses.filter((u) => u.id !== w.id) })} className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={11} /></button>
+                            </div>
                           ))}
                         </div>
                       ))}
@@ -57,6 +88,7 @@ export default function OfficeCorp() {
                 </div>
               ))}
             </div>
+            <div className="text-xs text-gray-400 mt-3">Наведите на узел → «＋» добавить дочерний, корзина — удалить. Имена правятся на месте.</div>
           </div>
 
           {/* общие настройки корпорации */}

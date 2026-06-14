@@ -88,6 +88,14 @@ export const searchDishes = (q: string) => {
   return dishes.filter((d) => d.name.toLowerCase().includes(s) || d.code.includes(s))
 }
 
+// Станция приготовления по группе блюда (роутинг марок на кухню/бар, KDS). Товары/услуги — без станции.
+export type Station = 'КУХНЯ' | 'БАР'
+export const stationOf = (groupId?: string): Station | null => {
+  if (groupId && ['g-hot', 'g-nat', 'g-dessert'].includes(groupId)) return 'КУХНЯ'
+  if (groupId && ['g-drink', 'g-coffee', 'g-bar'].includes(groupId)) return 'БАР'
+  return null
+}
+
 export const dishesByGroup = (groupId: string) => dishes.filter((d) => d.groupId === groupId)
 export const groupsByPage = (page: number) => menuGroups.filter((g) => g.page === page)
 export const findDish = (id: string) => dishes.find((d) => d.id === id)

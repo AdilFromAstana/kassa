@@ -3,18 +3,20 @@ import type {
   Order, OrderLine, ClosedOrder, Staff, CashShift, PersonalShift, StopItem, DocType, DocLine, StoreDoc, Message, TechCardItem, Contractor, Invoice, InvoiceLine,
   SelectedModifier, PaymentSplit, OrderType, CashMovement, Refund, Banquet, BanquetStatus, ClosedShift, Establishment,
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
-  MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice,
+  MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, PromoAction, DepositProgram, Certificate, License, PrintTemplate, InputDevice,
   DeliveryCustomer, Courier, DeliveryOrder, DeliveryStatus, DeliverySettings, DeliveryItem,
-  CorpSettings, Concept, DocNumber, SyncPoint, JournalEntry,
+  CorpSettings, CorpTree, Concept, DocNumber, SyncPoint, JournalEntry,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
-  loyaltyProgramSeed, loyaltyCardsSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed,
+  loyaltyProgramSeed, loyaltyCardsSeed, promoActionsSeed, depositProgramSeed, certificatesSeed, invoicesSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed,
   deliverySettingsSeed, couriersSeed, deliveryCustomersSeed, deliveryOrdersSeed,
-  corpSettingsSeed, conceptsSeed, docNumberingSeed, syncMonitorSeed } from '../mock/data'
+  corpSettingsSeed, corpTreeSeed, conceptsSeed, docNumberingSeed, syncMonitorSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
+import { welcomeBonusOf } from '../lib/loyalty'
 import { todayISO } from '../lib/date'
+import { repo } from '../api' // слой данных (localStorage сейчас → бэкенд позже без изменений UI)
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
@@ -50,7 +52,7 @@ const nextUid = () => `l${uidSeq++}`
 const DEFAULT_ESTABLISHMENT: Establishment = {
   name: 'Ресторан (KZ)', mode: 'restaurant',
   precheck: true, comments: true, courses: true, tab: false, mix: false,
-  kitchenScreen: false, banquets: true, delivery: false, iikoCard: false, fiscalBeforePay: false, frCount: 1,
+  kitchenScreen: true, banquets: true, delivery: true, iikoCard: true, fiscalBeforePay: false, frCount: 1,
 }
 function loadEstablishment(): Establishment {
   try {
@@ -76,7 +78,7 @@ function loadCategoryPrices(): Record<string, Record<string, number>> {
   return {}
 }
 function persistCategoryPrices(m: Record<string, Record<string, number>>) {
-  try { localStorage.setItem('iiko-category-prices', JSON.stringify(m)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-category-prices', m)
 }
 
 // Оверрайды техкарт из офиса (dishId → закладка). Касса списывает по ним.
@@ -91,7 +93,7 @@ function loadContractors(): Contractor[] {
 }
 function loadInvoices(): Invoice[] {
   try { const raw = localStorage.getItem('iiko-invoices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
-  return []
+  return invoicesSeed.map((i) => ({ ...i }))
 }
 
 // Сотрудники: справочник из офиса (карточки), seed из data.ts, поверх — сохранённые в localStorage.
@@ -100,7 +102,7 @@ function loadStaff(): Staff[] {
   return staffSeed.map((s) => ({ ...s }))
 }
 function persistStaff(list: Staff[]) {
-  try { localStorage.setItem('iiko-staff', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-staff', list)
 }
 
 // Приказы об изменении цен (Прейскурант).
@@ -109,7 +111,7 @@ function loadPriceOrders(): PriceOrder[] {
   return []
 }
 function persistPriceOrders(list: PriceOrder[]) {
-  try { localStorage.setItem('iiko-price-orders', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-price-orders', list)
 }
 
 // Выплаты сотрудникам (аванс/расчёт) — платёжная ведомость.
@@ -118,7 +120,7 @@ function loadSalary(): SalaryPayout[] {
   return []
 }
 function persistSalary(list: SalaryPayout[]) {
-  try { localStorage.setItem('iiko-salary', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-salary', list)
 }
 
 // Справочники Розничных продаж (раздел 03) — настраиваются в офисе, читаются кассой.
@@ -127,14 +129,14 @@ function loadPaymentTypes(): PaymentType[] {
   return paymentTypesSeed.map((p) => ({ ...p }))
 }
 function persistPaymentTypes(list: PaymentType[]) {
-  try { localStorage.setItem('iiko-payment-types', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-payment-types', list)
 }
 function loadOrderTypes(): OrderTypeDef[] {
   try { const raw = localStorage.getItem('iiko-order-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return orderTypesSeed.map((o) => ({ ...o }))
 }
 function persistOrderTypes(list: OrderTypeDef[]) {
-  try { localStorage.setItem('iiko-order-types', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-order-types', list)
 }
 // Сотрудники доп. (Phase 5): типы смен (расписание) + медкнижки (сроки).
 type ShiftType = { id: string; name: string; from: string; to: string }
@@ -142,49 +144,65 @@ function loadShiftTypes(): ShiftType[] {
   try { const raw = localStorage.getItem('iiko-shift-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return [{ id: 'sh-day', name: 'Дневная', from: '09:00', to: '18:00' }, { id: 'sh-eve', name: 'Вечерняя', from: '14:00', to: '23:00' }]
 }
-function persistShiftTypes(list: ShiftType[]) { try { localStorage.setItem('iiko-shift-types', JSON.stringify(list)) } catch { /* ignore */ } }
+function persistShiftTypes(list: ShiftType[]) { void repo.saveConfig('iiko-shift-types', list) }
 function loadMedChecks(): Record<string, string> {
   try { const raw = localStorage.getItem('iiko-med-checks'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistMedChecks(m: Record<string, string>) { try { localStorage.setItem('iiko-med-checks', JSON.stringify(m)) } catch { /* ignore */ } }
+function persistMedChecks(m: Record<string, string>) { void repo.saveConfig('iiko-med-checks', m) }
 // Профиль оплаты сотрудника (Зарплата): тип (оклад/повременная), оклад ₸, ставка ₸/ч. Касса читает те же значения.
 type PayProfile = { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }
 function loadPayProfiles(): Record<string, PayProfile> {
   try { const raw = localStorage.getItem('iiko-pay-profiles'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistPayProfiles(m: Record<string, PayProfile>) { try { localStorage.setItem('iiko-pay-profiles', JSON.stringify(m)) } catch { /* ignore */ } }
+function persistPayProfiles(m: Record<string, PayProfile>) { void repo.saveConfig('iiko-pay-profiles', m) }
 // iikoCard — бонусная программа + карты гостей (модуль 15).
 function loadLoyaltyProgram(): LoyaltyProgram {
   try { const raw = localStorage.getItem('iiko-loyalty-program'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return { ...loyaltyProgramSeed }
 }
-function persistLoyaltyProgram(p: LoyaltyProgram) { try { localStorage.setItem('iiko-loyalty-program', JSON.stringify(p)) } catch { /* ignore */ } }
+function persistLoyaltyProgram(p: LoyaltyProgram) { void repo.saveConfig('iiko-loyalty-program', p) }
 function loadLoyaltyCards(): LoyaltyCard[] {
   try { const raw = localStorage.getItem('iiko-loyalty-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return loyaltyCardsSeed.map((c) => ({ ...c }))
 }
-function persistLoyaltyCards(list: LoyaltyCard[]) { try { localStorage.setItem('iiko-loyalty-cards', JSON.stringify(list)) } catch { /* ignore */ } }
+function persistLoyaltyCards(list: LoyaltyCard[]) { void repo.saveConfig('iiko-loyalty-cards', list) }
+// iikoCard: конструктор акций (бонусная программа), депозитная программа, сертификаты.
+function loadPromoActions(): PromoAction[] {
+  try { const raw = localStorage.getItem('iiko-promo-actions'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return promoActionsSeed.map((a) => ({ ...a }))
+}
+function persistPromoActions(list: PromoAction[]) { void repo.saveConfig('iiko-promo-actions', list) }
+function loadDepositProgram(): DepositProgram {
+  try { const raw = localStorage.getItem('iiko-deposit-program'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return { ...depositProgramSeed }
+}
+function persistDepositProgram(p: DepositProgram) { void repo.saveConfig('iiko-deposit-program', p) }
+function loadCertificates(): Certificate[] {
+  try { const raw = localStorage.getItem('iiko-certificates'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return certificatesSeed.map((c) => ({ ...c }))
+}
+function persistCertificates(list: Certificate[]) { void repo.saveConfig('iiko-certificates', list) }
 // Администрирование (модуль 12): лицензии, печатные формы, устройства ввода.
 function loadAdmin<T>(key: string, seed: T): T {
   try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return seed
 }
-function persistAdmin(key: string, val: unknown) { try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* ignore */ } }
+function persistAdmin(key: string, val: unknown) { void repo.saveConfig(key, val) }
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
 }
 function persistCashOpTypes(list: CashOpType[]) {
-  try { localStorage.setItem('iiko-cashop-types', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-cashop-types', list)
 }
 function loadWriteoffReasons(): string[] {
   try { const raw = localStorage.getItem('iiko-writeoff-reasons'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return [...writeoffReasonSeed]
 }
 function persistWriteoffReasons(list: string[]) {
-  try { localStorage.setItem('iiko-writeoff-reasons', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-writeoff-reasons', list)
 }
 // Дисконтная система (раздел 10): скидки/надбавки + клубные карты.
 function loadDiscounts(): Discount[] {
@@ -192,14 +210,14 @@ function loadDiscounts(): Discount[] {
   return discountSeed.map((d) => ({ ...d }))
 }
 function persistDiscounts(list: Discount[]) {
-  try { localStorage.setItem('iiko-discounts', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-discounts', list)
 }
 function loadClubCards(): ClubCard[] {
   try { const raw = localStorage.getItem('iiko-club-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return clubCardSeed.map((c) => ({ ...c }))
 }
 function persistClubCards(list: ClubCard[]) {
-  try { localStorage.setItem('iiko-club-cards', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-club-cards', list)
 }
 // Мотивационные программы + удержания (раздел 06).
 function loadMotivation(): MotivationProgram[] {
@@ -207,14 +225,14 @@ function loadMotivation(): MotivationProgram[] {
   return motivationSeed.map((m) => ({ ...m }))
 }
 function persistMotivation(list: MotivationProgram[]) {
-  try { localStorage.setItem('iiko-motivation', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-motivation', list)
 }
 function loadDeductions(): SalaryDeduction[] {
   try { const raw = localStorage.getItem('iiko-deductions'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return []
 }
 function persistDeductions(list: SalaryDeduction[]) {
-  try { localStorage.setItem('iiko-deductions', JSON.stringify(list)) } catch { /* ignore */ }
+  void repo.saveConfig('iiko-deductions', list)
 }
 
 // ───────── мок-персист ОПЕРАТИВНОГО слоя (смена/заказы/банкеты/стоп-лист/документы/сообщения) ─────────
@@ -230,11 +248,9 @@ function loadRuntime(): Record<string, unknown> {
   return {}
 }
 function persistRuntime(state: Record<string, unknown>) {
-  try {
-    const snap: Record<string, unknown> = {}
-    for (const k of RUNTIME_KEYS) snap[k] = state[k]
-    localStorage.setItem('iiko-runtime', JSON.stringify(snap))
-  } catch { /* ignore */ }
+  const snap: Record<string, unknown> = {}
+  for (const k of RUNTIME_KEYS) snap[k] = state[k]
+  void repo.saveRuntime(snap) // через слой данных (fire-and-forget; локально пишет синхронно в тот же ключ 'iiko-runtime')
 }
 
 // Карта роль→права (дефолт из rights.ts + оверрайд из офиса в localStorage).
@@ -257,20 +273,19 @@ function loadIngredients(): Ingredient[] {
   return baseIngredients.map((i) => ({ ...i }))
 }
 function persistIngredients(ings: Ingredient[]) {
-  try {
-    const map: Record<string, number> = {}
-    for (const i of ings) map[i.id] = i.stock
-    localStorage.setItem('iiko-stock', JSON.stringify(map))
-  } catch { /* ignore */ }
+  const map: Record<string, number> = {}
+  for (const i of ings) map[i.id] = i.stock
+  void repo.saveConfig('iiko-stock', map)
 }
 
-// Авто-наполнение демо-заказами при запуске (для показа заказчику). Флаг в localStorage.
+// Авто-наполнение демо-данными при запуске (для показа заказчику без бэка). По умолчанию ВКЛ —
+// чтобы все экраны были «живыми»; выключается явно (Доп. → демо-режим, флаг '0' в localStorage).
 function loadDemoAuto(): boolean {
-  try { return localStorage.getItem('iiko-demo-auto') === '1' } catch { return false }
+  try { return localStorage.getItem('iiko-demo-auto') !== '0' } catch { return true }
 }
 const DEMO_AUTO = loadDemoAuto()
 const DEMO_INIT = DEMO_AUTO
-  ? buildDemo({ count: 24, openCount: 4, startFiscal: 3681821000, startOrderId: 184, startMovement: 0 })
+  ? buildDemo({ count: 52, openCount: 5, startFiscal: 3681821000, startOrderId: 184, startMovement: 0 })
   : null
 
 // Дефолты оплаты сотрудника (используются и офисом, и кассой — единая логика).
@@ -333,8 +348,11 @@ interface PosState {
   shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
   medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
   payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
-  loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard (офис → касса)
-  loyaltyCards: LoyaltyCard[]    // карты гостей iikoCard с балансом бонусов
+  loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard: мастер-переключатель (офис → касса)
+  loyaltyCards: LoyaltyCard[]    // карты гостей iikoCard (бонусы + депозит)
+  promoActions: PromoAction[]    // конструктор акций iikoCard (правила начисления/списания)
+  depositProgram: DepositProgram // депозитная («Денежная») программа: кошелёк гостя
+  certificates: Certificate[]    // подарочные сертификаты
   licenseClientId: string        // Администрирование: клиентский ID лицензии
   licenses: License[]            // установленные лицензии (модуль/количество/срок)
   printTemplates: PrintTemplate[] // шаблоны печатных форм (стандартные/пользовательские)
@@ -345,6 +363,7 @@ interface PosState {
   deliveryOrders: DeliveryOrder[]   // заказы доставки (жизненный цикл)
   deliverySeq: number
   corpSettings: CorpSettings   // настройки корпорации (название/БИН/валюта/округление)
+  corpTree: CorpTree           // структура сети (юрлицо→подразделение→ТП→склад), редактируемая
   concepts: Concept[]          // концепции (бренд/тип обслуживания)
   docNumbering: DocNumber[]    // шаблоны нумерации документов
   syncMonitor: SyncPoint[]     // монитор синхронизации ЦО↔ТП
@@ -384,7 +403,8 @@ interface PosState {
   setGuestNo: (uid: string, guestNo: number | undefined) => void
   setLineComment: (uid: string, comment: string) => void
   setLineCourse: (uid: string, course: number | undefined) => void
-  cycleKitchen: (uid: string) => void // продвинуть кухонный статус блюда (new→cooking→ready→served)
+  cycleKitchen: (uid: string) => void // продвинуть кухонный статус блюда текущего заказа (new→cooking→ready→served)
+  cycleKitchenAt: (orderId: number, uid: string) => void // то же для произвольного заказа (кухонный экран KDS)
   setOrderWaiter: (orderId: number, waiter: string) => void
   setOrderType: (orderId: number, type: OrderType) => void
   setOrderTab: (orderId: number, tabName: string | undefined) => void // барный счёт (Tab)
@@ -394,10 +414,22 @@ interface PosState {
   setLineDiscount: (uid: string, pct: number) => void  // скидка на позицию, %
   setOrderPrepayment: (orderId: number, amount: number) => void // предоплата/депозит по заказу
   setLoyaltyProgram: (patch: Partial<LoyaltyProgram>) => void
-  addLoyaltyCard: (c: Omit<LoyaltyCard, 'id' | 'balance'>) => void
+  addLoyaltyCard: (c: Omit<LoyaltyCard, 'id' | 'balance' | 'deposit'>) => void
   removeLoyaltyCard: (id: string) => void
   attachLoyaltyCard: (orderId: number, cardId: string | undefined) => void
   adjustBonus: (cardId: string, delta: number) => void // начисление (+) / списание (−) бонусов
+  // iikoCard: конструктор акций
+  addPromoAction: (a: Omit<PromoAction, 'id'>) => void
+  updatePromoAction: (id: string, patch: Partial<PromoAction>) => void
+  removePromoAction: (id: string) => void
+  // iikoCard: депозит (денежный кошелёк)
+  setDepositProgram: (patch: Partial<DepositProgram>) => void
+  topUpDeposit: (cardId: string, amount: number) => void // пополнение кошелька (офис)
+  adjustDeposit: (cardId: string, delta: number) => void  // списание (−) при оплате на кассе
+  // iikoCard: сертификаты
+  issueCertificate: (c: Omit<Certificate, 'id' | 'status' | 'issuedAt'>) => void
+  redeemCertificate: (id: string) => void
+  voidCertificate: (id: string) => void
   setLicenseClientId: (id: string) => void
   addLicense: (l: Omit<License, 'id'>) => void
   removeLicense: (id: string) => void
@@ -419,6 +451,7 @@ interface PosState {
   cancelDelivery: (id: number, reason: string) => void
   // корпорация (модуль 02)
   setCorpSettings: (patch: Partial<CorpSettings>) => void
+  setCorpTree: (tree: CorpTree) => void  // полная замена дерева структуры (CRUD считается в компоненте)
   addConcept: (code: string, name: string, group: string) => void
   removeConcept: (id: string) => void
   setDocTemplate: (id: string, template: string) => void
@@ -455,7 +488,7 @@ interface PosState {
   markAllMessagesRead: () => void
   replyMessage: (toTitle: string, text: string) => void
   addContractor: (name: string, bin: string) => void
-  addPurchase: (supplierId: string, lines: InvoiceLine[]) => Invoice | null // приходная + ЭСФ + приход на склад
+  addPurchase: (supplierId: string, lines: InvoiceLine[], header?: { store?: string; date?: string; no?: string; esfNo?: string }) => Invoice | null // приходная + ЭСФ + приход на склад
   addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string; toStore?: string; result?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
@@ -534,7 +567,7 @@ export const usePos = create<PosState>((set, get) => ({
   staffList: loadStaff(),
   user: null,
   personalShift: null,
-  cashShift: DEMO_INIT ? { no: 108, openedAt: fullNow(), openedBy: 'Петров К.С.' } : null,
+  cashShift: DEMO_INIT ? { no: 108, openedAt: fullNow(), openedBy: 'Петров К.С.', openingCash: 20000 } : null,
   cashShiftSeq: 108,
   orders: DEMO_INIT?.orders ?? [],
   closedOrders: DEMO_INIT?.closedOrders ?? [],
@@ -547,7 +580,7 @@ export const usePos = create<PosState>((set, get) => ({
   documents: [],
   docSeq: 0,
   banquets: initialBanquets,
-  closedShifts: [],
+  closedShifts: DEMO_INIT?.closedShifts ?? [],
   stopList: [],
   ingredients: loadIngredients(),
   establishment: loadEstablishment(),
@@ -571,6 +604,9 @@ export const usePos = create<PosState>((set, get) => ({
   payProfiles: loadPayProfiles(),
   loyaltyProgram: loadLoyaltyProgram(),
   loyaltyCards: loadLoyaltyCards(),
+  promoActions: loadPromoActions(),
+  depositProgram: loadDepositProgram(),
+  certificates: loadCertificates(),
   licenseClientId: loadAdmin('iiko-license-clientid', licenseClientIdSeed),
   licenses: loadAdmin('iiko-licenses', licensesSeed.map((l) => ({ ...l }))),
   printTemplates: loadAdmin('iiko-print-templates', printTemplatesSeed.map((t) => ({ ...t }))),
@@ -581,6 +617,7 @@ export const usePos = create<PosState>((set, get) => ({
   deliveryOrders: loadAdmin('iiko-delivery-orders', deliveryOrdersSeed.map((o) => ({ ...o }))),
   deliverySeq: loadAdmin<DeliveryOrder[]>('iiko-delivery-orders', deliveryOrdersSeed).reduce((m, o) => Math.max(m, o.id), 1003),
   corpSettings: loadAdmin('iiko-corp-settings', { ...corpSettingsSeed }),
+  corpTree: loadAdmin('iiko-corp-tree', JSON.parse(JSON.stringify(corpTreeSeed))),
   concepts: loadAdmin('iiko-concepts', conceptsSeed.map((c) => ({ ...c }))),
   docNumbering: loadAdmin('iiko-doc-numbering', docNumberingSeed.map((d) => ({ ...d }))),
   syncMonitor: syncMonitorSeed.map((p) => ({ ...p })),
@@ -739,6 +776,18 @@ export const usePos = create<PosState>((set, get) => ({
           }) } : o),
     }
   }),
+  cycleKitchenAt: (orderId, uid) => set((st) => {
+    const next: Record<string, 'new' | 'cooking' | 'ready' | 'served'> = { new: 'cooking', cooking: 'ready', ready: 'served', served: 'new' }
+    const hm = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    return {
+      orders: st.orders.map((o) => o.id === orderId
+        ? { ...o, lines: o.lines.map((l) => {
+            if (l.uid !== uid) return l
+            const status = next[l.kitchenStatus ?? 'new']
+            return { ...l, kitchenStatus: status, firedAt: status === 'cooking' ? hm : l.firedAt }
+          }) } : o),
+    }
+  }),
   setOrderWaiter: (orderId, waiter) => set((st) => ({
     orders: st.orders.map((o) => (o.id === orderId ? { ...o, waiter } : o)),
   })),
@@ -771,7 +820,7 @@ export const usePos = create<PosState>((set, get) => ({
     return { loyaltyProgram: p }
   }),
   addLoyaltyCard: (c) => set((st) => {
-    const list = [...st.loyaltyCards, { ...c, id: 'lc-' + (st.loyaltyCards.length + 1), balance: st.loyaltyProgram.welcomeBonus }]
+    const list = [...st.loyaltyCards, { ...c, id: 'lc-' + (st.loyaltyCards.length + 1), balance: welcomeBonusOf(st.promoActions), deposit: 0 }]
     persistLoyaltyCards(list)
     return { loyaltyCards: list }
   }),
@@ -787,6 +836,55 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.loyaltyCards.map((c) => (c.id === cardId ? { ...c, balance: +(c.balance + delta).toFixed(2) } : c))
     persistLoyaltyCards(list)
     return { loyaltyCards: list }
+  }),
+  // ───────── iikoCard: конструктор акций ─────────
+  addPromoAction: (a) => set((st) => {
+    const list = [...st.promoActions, { ...a, id: 'pa-' + (st.promoActions.length + 1) + '-' + a.type }]
+    persistPromoActions(list)
+    return { promoActions: list }
+  }),
+  updatePromoAction: (id, patch) => set((st) => {
+    const list = st.promoActions.map((a) => (a.id === id ? { ...a, ...patch } : a))
+    persistPromoActions(list)
+    return { promoActions: list }
+  }),
+  removePromoAction: (id) => set((st) => {
+    const list = st.promoActions.filter((a) => a.id !== id)
+    persistPromoActions(list)
+    return { promoActions: list }
+  }),
+  // ───────── iikoCard: депозит (денежный кошелёк) ─────────
+  setDepositProgram: (patch) => set((st) => {
+    const p = { ...st.depositProgram, ...patch }
+    persistDepositProgram(p)
+    return { depositProgram: p }
+  }),
+  topUpDeposit: (cardId, amount) => set((st) => {
+    if (!(amount > 0)) return {}
+    const list = st.loyaltyCards.map((c) => (c.id === cardId ? { ...c, deposit: +(c.deposit + amount).toFixed(2) } : c))
+    persistLoyaltyCards(list)
+    return { loyaltyCards: list }
+  }),
+  adjustDeposit: (cardId, delta) => set((st) => {
+    const list = st.loyaltyCards.map((c) => (c.id === cardId ? { ...c, deposit: +(c.deposit + delta).toFixed(2) } : c))
+    persistLoyaltyCards(list)
+    return { loyaltyCards: list }
+  }),
+  // ───────── iikoCard: сертификаты ─────────
+  issueCertificate: (c) => set((st) => {
+    const list = [...st.certificates, { ...c, id: 'cert-' + (st.certificates.length + 1), status: 'active' as const, issuedAt: todayISO() }]
+    persistCertificates(list)
+    return { certificates: list }
+  }),
+  redeemCertificate: (id) => set((st) => {
+    const list = st.certificates.map((c) => (c.id === id ? { ...c, status: 'used' as const, usedAt: todayISO() } : c))
+    persistCertificates(list)
+    return { certificates: list }
+  }),
+  voidCertificate: (id) => set((st) => {
+    const list = st.certificates.filter((c) => c.id !== id)
+    persistCertificates(list)
+    return { certificates: list }
   }),
   // ───────── Администрирование (модуль 12) ─────────
   setLicenseClientId: (id) => { persistAdmin('iiko-license-clientid', id); set({ licenseClientId: id }) },
@@ -889,6 +987,7 @@ export const usePos = create<PosState>((set, get) => ({
     persistAdmin('iiko-corp-settings', s)
     return { corpSettings: s }
   }),
+  setCorpTree: (tree) => { persistAdmin('iiko-corp-tree', tree); set({ corpTree: tree }) },
   addConcept: (code, name, group) => set((st) => {
     const list = [...st.concepts, { id: 'cn-' + (st.concepts.length + 1), code, name, group }]
     persistAdmin('iiko-concepts', list)
@@ -1128,22 +1227,26 @@ export const usePos = create<PosState>((set, get) => ({
   addContractor: (name, bin) => set((st) => {
     if (!name || !bin || st.contractors.some((c) => c.bin === bin)) return st
     const contractors = [...st.contractors, { id: 'c-' + bin, name, bin }]
-    try { localStorage.setItem('iiko-contractors', JSON.stringify(contractors)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-contractors', contractors)
     return { contractors }
   }),
   // Приходная накладная (KZ): создаёт входящую ЭСФ + приходует ингредиенты на склад.
-  addPurchase: (supplierId, lines) => {
+  addPurchase: (supplierId, lines, header) => {
     const sup = get().contractors.find((c) => c.id === supplierId)
     if (!sup || lines.length === 0) return null
     const total = +lines.reduce((s, l) => s + l.qty * l.price, 0).toFixed(2)
     const vat = +(total - total / 1.16).toFixed(2) // ҚҚС 16% в т.ч.
     const n = get().invSeq + 1
-    const inv: Invoice = { id: n, no: `ПН-${1000 + n}`, date: fullNow(), supplierName: sup.name, supplierBin: sup.bin, lines, total, vat, esfNo: `ESF-KZ-${100000 + n}`, kind: 'in' }
+    const inv: Invoice = {
+      id: n, no: header?.no?.trim() || `ПН-${1000 + n}`, date: header?.date?.trim() || fullNow(),
+      supplierName: sup.name, supplierBin: sup.bin, lines, total, vat,
+      esfNo: header?.esfNo?.trim() || `ESF-KZ-${100000 + n}`, kind: 'in', store: header?.store,
+    }
     set((st) => {
       const ingredients = st.ingredients.map((i) => { const l = lines.find((x) => x.ingredientId === i.id); return l ? { ...i, stock: +(i.stock + l.qty).toFixed(3) } : i })
       persistIngredients(ingredients)
       const invoices = [inv, ...st.invoices]
-      try { localStorage.setItem('iiko-invoices', JSON.stringify(invoices)) } catch { /* ignore */ }
+      void repo.saveConfig('iiko-invoices', invoices)
       return { invoices, invSeq: n, ingredients }
     })
     return inv
@@ -1157,7 +1260,7 @@ export const usePos = create<PosState>((set, get) => ({
     const inv: Invoice = { id: n, no: `ЭСФ-OUT-${1000 + n}`, date: fullNow(), supplierName: b.name, supplierBin: b.bin, lines: [], total, vat, esfNo: `ESF-OUT-${100000 + n}`, kind: 'out' }
     set((st) => {
       const invoices = [inv, ...st.invoices]
-      try { localStorage.setItem('iiko-invoices', JSON.stringify(invoices)) } catch { /* ignore */ }
+      void repo.saveConfig('iiko-invoices', invoices)
       return { invoices, invSeq: n }
     })
     return inv
@@ -1166,7 +1269,7 @@ export const usePos = create<PosState>((set, get) => ({
     const cur = st.roleRights[position] ?? []
     const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]
     const next = { ...st.roleRights, [position]: nextList }
-    try { localStorage.setItem('iiko-role-rights', JSON.stringify(next)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-role-rights', next)
     return { roleRights: next }
   }),
 
@@ -1191,7 +1294,7 @@ export const usePos = create<PosState>((set, get) => ({
 
   setEstablishment: (patch) => set((st) => {
     const next = { ...st.establishment, ...patch }
-    try { localStorage.setItem('iiko-establishment', JSON.stringify(next)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-establishment', next)
     return { establishment: next }
   }),
   priceOf: (dishId, basePrice) => {
@@ -1201,7 +1304,7 @@ export const usePos = create<PosState>((set, get) => ({
   },
   setDishPrice: (dishId, price) => set((st) => {
     const next = { ...st.priceOverrides, [dishId]: price }
-    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(next)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-menu-prices', next)
     return { priceOverrides: next }
   }),
   setCategoryPrice: (catId, dishId, price) => set((st) => {
@@ -1213,20 +1316,20 @@ export const usePos = create<PosState>((set, get) => ({
   addPriceCategory: (name) => set((st) => {
     const id = 'pc-' + (st.priceCategories.length + 1)
     const list = [...st.priceCategories, { id, name }]
-    try { localStorage.setItem('iiko-price-categories', JSON.stringify(list)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-price-categories', list)
     return { priceCategories: list }
   }),
   removePriceCategory: (catId) => set((st) => {
     if (catId === 'base') return {}
     const list = st.priceCategories.filter((c) => c.id !== catId)
     const cp = { ...st.categoryPrices }; delete cp[catId]
-    try { localStorage.setItem('iiko-price-categories', JSON.stringify(list)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-price-categories', list)
     persistCategoryPrices(cp)
     return { priceCategories: list, categoryPrices: cp, activePriceCategory: st.activePriceCategory === catId ? 'base' : st.activePriceCategory }
   }),
   setTechCard: (dishId, items) => set((st) => {
     const next = { ...st.techCardOverrides, [dishId]: items }
-    try { localStorage.setItem('iiko-techcards', JSON.stringify(next)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-techcards', next)
     return { techCardOverrides: next }
   }),
 
@@ -1267,7 +1370,7 @@ export const usePos = create<PosState>((set, get) => ({
     if (!order) return {}
     const prices = { ...st.priceOverrides }
     for (const l of order.lines) prices[l.dishId] = l.newPrice
-    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(prices)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-menu-prices', prices)
     const list = st.priceOrders.map((o) => (o.id === id ? { ...o, status: 'active' as const } : o))
     persistPriceOrders(list)
     return { priceOverrides: prices, priceOrders: list }
@@ -1280,7 +1383,7 @@ export const usePos = create<PosState>((set, get) => ({
     const ordered = [...due].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
     const prices = { ...get().priceOverrides }
     for (const o of ordered) for (const l of o.lines) prices[l.dishId] = l.newPrice
-    try { localStorage.setItem('iiko-menu-prices', JSON.stringify(prices)) } catch { /* ignore */ }
+    void repo.saveConfig('iiko-menu-prices', prices)
     const dueIds = new Set(ordered.map((o) => o.id))
     const list = get().priceOrders.map((o) => (dueIds.has(o.id) ? { ...o, status: 'active' as const } : o))
     persistPriceOrders(list)
@@ -1473,9 +1576,10 @@ export const usePos = create<PosState>((set, get) => ({
       startFiscal: st.fiscalSeq, startOrderId: st.orderSeq, startMovement: st.movementSeq,
     })
     return {
-      cashShift: st.cashShift ?? { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: st.user?.name ?? 'Петров К.С.' },
+      cashShift: st.cashShift ?? { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: st.user?.name ?? 'Петров К.С.', openingCash: 20000 },
       orders: d.orders,
       closedOrders: d.closedOrders,
+      closedShifts: d.closedShifts,
       cashMovements: d.cashMovements,
       writeOffs: d.writeOffs,
       refunds: [],

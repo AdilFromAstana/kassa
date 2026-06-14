@@ -163,21 +163,52 @@ export interface ClubCard {
   discountId: string    // тип скидки (из скидок со способом «по карте»)
 }
 
-// iikoCard — карта гостя бонусной программы лояльности (модуль 15). Баланс — в бонусах (1 бонус = 1 ₸).
+// iikoCard — карта гостя программ лояльности (модуль 15). Один гость = бонусный счёт + денежный кошелёк (депозит).
 export interface LoyaltyCard {
   id: string
   number: string
   owner: string
   phone: string
-  balance: number       // остаток бонусов, ₸
+  balance: number       // остаток бонусов, ₸ (1 бонус = 1 ₸)
+  deposit: number       // остаток денежного кошелька (депозитная/«Денежная» программа), ₸
 }
 
-// Бонусная программа iikoCard (портал iiko.biz). Упрощённо: % начисления + лимит оплаты бонусами.
+// Бонусная программа iikoCard (портал iiko.biz). Мастер-переключатель; правила — в конструкторе акций (PromoAction).
 export interface LoyaltyProgram {
   active: boolean
-  accrualPct: number    // «пополнить счёт на % от заказа» — начисление бонусов
-  redeemLimitPct: number // «лимит оплаты от стоимости заказа» — макс. доля оплаты бонусами
-  welcomeBonus: number  // приветственный бонус при выпуске карты
+}
+
+// Маркетинговая акция iikoCard — блок конструктора «условие → действие» (модуль 15, портал iiko.biz).
+// Условие: сумма заказа не менее minSum. Действие задаётся type.
+export type PromoActionType =
+  | 'accruePercent' // «Пополнить счёт на % от заказа» — начисление бонусов (опц. маска: только категория)
+  | 'accrueFixed'   // «Пополнить счёт на сумму» — фикс. начисление бонусов
+  | 'paymentLimit'  // «Оплата со счёта» — лимит оплаты бонусами, % от чека
+  | 'welcome'       // приветственный бонус при выпуске карты
+export interface PromoAction {
+  id: string
+  name: string
+  type: PromoActionType
+  active: boolean
+  percent?: number      // accruePercent / paymentLimit
+  amount?: number       // accrueFixed / welcome, ₸
+  minSum?: number       // условие: сумма заказа не менее, ₸ (0/undefined — без условия)
+  groupId?: string      // accruePercent: маска блюд — начислять только с категории (пусто = весь заказ)
+}
+
+// Депозитная («Денежная») программа iikoCard: денежный кошелёк гостя. Здесь — мастер-переключатель.
+export interface DepositProgram { active: boolean }
+
+// Подарочный сертификат iikoCard (сертификатная программа, модуль 15). Номинал списывается при оплате.
+export interface Certificate {
+  id: string
+  number: string
+  nominal: number       // номинал, ₸
+  issuedAt: string      // дата выпуска (ISO)
+  expiresAt: string     // действует до (ISO)
+  status: 'active' | 'used' | 'expired'
+  owner?: string        // кому выдан (опц.)
+  usedAt?: string       // когда погашен (мок: дата-время)
 }
 
 // Тип внесения/изъятия наличных (Розничные продажи → Типы внесений/изъятий, topic-102).
@@ -326,6 +357,7 @@ export interface Invoice {
   vat: number         // ҚҚС в т.ч. (16%)
   esfNo: string       // № ЭСФ (ИС ЭСФ)
   kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
+  store?: string      // склад-получатель прихода (приходная накладная)
 }
 
 // ───────── Бухгалтерия: двойная запись (модуль 07) ─────────
@@ -344,6 +376,12 @@ export interface CorpSettings {
   roundToWhole: boolean // округлять стоимость заказа до целого в пользу гостя
 }
 export interface Concept { id: string; code: string; name: string; group: string } // концепция (бренд/тип обслуживания)
+// Структура сети (Корпорация → дерево): юрлицо → подразделение → торговое предприятие → склад. Редактируемый CRUD.
+export interface CorpWarehouse { id: string; name: string }
+export interface CorpPoint { id: string; name: string; warehouses: CorpWarehouse[] }
+export interface CorpDivision { id: string; name: string; points: CorpPoint[] }
+export interface CorpLegal { id: string; name: string; bin: string; divisions: CorpDivision[] }
+export interface CorpTree { name: string; legal: CorpLegal[] }
 export interface DocNumber { id: string; docType: string; template: string; counter: number } // шаблон нумерации документа
 export interface SyncPoint { id: string; point: string; lastImport: string; lastExport: string; status: 'ok' | 'requested' | 'skipped' | 'error' } // монитор синхронизации ТП
 

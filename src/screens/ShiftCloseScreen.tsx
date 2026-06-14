@@ -13,7 +13,7 @@ const DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20]
 // Мастер закрытия кассовой смены (FRONT_03 §5.3): незакрытые заказы → пересчёт → отчёты → Z-отчёт.
 export default function ShiftCloseScreen() {
   const navigate = useNavigate()
-  const { orders, closedOrders, cashShift, cashMovements, closeCashShift, forceCloseOrder, addCashMovement } = usePos()
+  const { orders, closedOrders, cashShift, cashMovements, refunds, closeCashShift, forceCloseOrder, addCashMovement } = usePos()
   const [step, setStep] = useState(1)
   const [denoms, setDenoms] = useState<Record<number, string>>({})
   const [fundStr, setFundStr] = useState('') // разменный фонд, оставляемый на след. смену
@@ -24,7 +24,9 @@ export default function ShiftCloseScreen() {
     .reduce((s, p) => s + p.amount, 0)
   const cashIn = cashMovements.filter((m) => m.kind === 'in').reduce((s, m) => s + m.amount, 0)
   const cashOut = cashMovements.filter((m) => m.kind === 'out').reduce((s, m) => s + m.amount, 0)
-  const cashExpected = +(cashSales + cashIn - cashOut).toFixed(2)
+  // возвраты наличными уменьшают деньги в ящике (карточные — нет)
+  const cashRefunds = +refunds.filter((r) => r.method !== 'card').reduce((s, r) => s + r.amount, 0).toFixed(2)
+  const cashExpected = +(cashSales + cashIn - cashOut - cashRefunds).toFixed(2)
   const revenue = closedOrders.reduce((s, o) => s + o.total, 0)
 
   // купюрная раскладка → фактически пересчитанная сумма наличных
@@ -101,6 +103,7 @@ export default function ShiftCloseScreen() {
               <div className="flex justify-between text-white/50"><span>Продажи за наличные:</span><span>{formatTenge(cashSales)}</span></div>
               <div className="flex justify-between text-white/50"><span>+ внесения (вкл. разменный фонд):</span><span>{formatTenge(cashIn)}</span></div>
               <div className="flex justify-between text-white/50"><span>− изъятия:</span><span>{formatTenge(cashOut)}</span></div>
+              {cashRefunds > 0 && <div className="flex justify-between text-white/50"><span>− возвраты наличными:</span><span>{formatTenge(cashRefunds)}</span></div>}
               <div className="flex justify-between border-t border-white/10 pt-1"><span>Расчётная сумма наличных:</span><b>{formatTenge(cashExpected)}</b></div>
               <div className="flex justify-between"><span>Пересчитано фактически:</span><b>{formatTenge(counted)}</b></div>
               <div className={`flex justify-between ${diff === 0 ? 'text-pos-green' : 'text-pos-rose'}`}><span>Расхождение:</span><b>{formatTenge(diff)}</b></div>

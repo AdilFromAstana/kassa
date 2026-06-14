@@ -24,6 +24,7 @@ import WarehouseScreen from './screens/WarehouseScreen'
 import DocumentsScreen from './screens/DocumentsScreen'
 import OfficeScreen from './screens/OfficeScreen'
 import EquipmentScreen from './screens/EquipmentScreen'
+import KitchenScreen from './screens/KitchenScreen'
 
 // HashRouter — чтобы работало как статика (file://) при встраивании в Electron.
 export const router = createHashRouter([
@@ -52,4 +53,5 @@ export const router = createHashRouter([
   { path: '/documents', element: <DocumentsScreen /> },
   { path: '/office', element: <OfficeScreen /> }, // бэк-офис (мок): правит конфиг заведения → касса читает
   { path: '/equipment', element: <EquipmentScreen /> }, // Инструменты → Настройка оборудования (локально на терминале)
+  { path: '/kitchen', element: <KitchenScreen /> }, // кухонный экран (KDS) — повар видит блюда станций по статусам
 ])
