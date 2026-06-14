@@ -53,6 +53,7 @@ const DEFAULT_ESTABLISHMENT: Establishment = {
   name: 'Ресторан (KZ)', mode: 'restaurant',
   precheck: true, comments: true, courses: true, tab: false, mix: false,
   kitchenScreen: true, banquets: true, delivery: true, iikoCard: true, fiscalBeforePay: false, frCount: 1,
+  serviceCharge: { active: false, percent: 10 },
 }
 function loadEstablishment(): Establishment {
   try {
@@ -308,7 +309,7 @@ export const lineTotal = (l: OrderLine): number => lineUnitPrice(l) * l.qty * (1
 export const orderSubtotal = (o: Order): number => o.lines.reduce((s, l) => s + lineTotal(l), 0)
 export const orderTotal = (o: Order): number => {
   const sub = orderSubtotal(o)
-  const afterPct = sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)
+  const afterPct = sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100) * (1 + (o.serviceChargePct ?? 0) / 100)
   return +Math.max(0, afterPct - (o.discountAmount ?? 0)).toFixed(2)
 }
 
@@ -702,11 +703,13 @@ export const usePos = create<PosState>((set, get) => ({
 
   startOrder: ({ tableId, hallId, guests, type = 'dinein' }) => {
     const id = get().orderSeq + 1
+    const sc = get().establishment.serviceCharge
     const order: Order = {
       id, tableId, hallId, guests,
       waiter: get().user?.name ?? '',
       type,
       lines: [], discountPct: 0, surchargePct: 0,
+      serviceChargePct: sc?.active ? sc.percent : 0,
       openedAt: now(), status: 'open',
     }
     set((st) => ({ orders: [...st.orders, order], orderSeq: id, currentOrderId: id }))
@@ -1069,7 +1072,7 @@ export const usePos = create<PosState>((set, get) => ({
     if (mine.length === 0) return null
     const rest = o.lines.filter((l) => l.guestNo !== guestNo)
     const sub = mine.reduce((s, l) => s + lineTotal(l), 0)
-    const total = +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100)).toFixed(2)
+    const total = +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100) * (1 + (o.serviceChargePct ?? 0) / 100)).toFixed(2)
     const change = Math.max(0, received - total)
     const fiscalDocNo = String(get().fiscalSeq + 1)
     const closed: ClosedOrder = {

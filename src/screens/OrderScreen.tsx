@@ -210,6 +210,7 @@ export default function OrderScreen() {
             {isRest && <div className="flex justify-between text-gray-500"><span>Гость {activeGuest}</span><span>{formatTenge(guestSum(activeGuest))}</span></div>}
             <div className="flex justify-between text-gray-500"><span>Скидка / Надбавка</span><span>{order.discountPct.toFixed(2)}% / {order.surchargePct.toFixed(2)}%</span></div>
             {order.discountAmount ? <div className="flex justify-between text-gray-500"><span>Скидка суммой</span><span>− {formatTenge(order.discountAmount)}</span></div> : null}
+            {order.serviceChargePct ? <div className="flex justify-between text-gray-500"><span>Сервисный сбор</span><span>+ {order.serviceChargePct}%</span></div> : null}
             <div className="flex justify-between text-gray-500"><span>подытог (весь заказ)</span><span>{formatTenge(orderSubtotal(order))}</span></div>
             <div className="flex justify-between text-2xl font-bold mt-1"><span>ИТОГО</span><span>{formatTenge(orderTotal(order))}</span></div>
           </div>

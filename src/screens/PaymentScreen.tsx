@@ -122,7 +122,7 @@ export default function PaymentScreen() {
   // ───────── расчёты ─────────
   const payLines = guestNo != null ? order!.lines.filter((l) => l.guestNo === guestNo) : order!.lines
   const sub = payLines.reduce((s, l) => s + lineTotal(l), 0)
-  const afterPct = +(sub * (1 - order!.discountPct / 100) * (1 + order!.surchargePct / 100)).toFixed(2)
+  const afterPct = +(sub * (1 - order!.discountPct / 100) * (1 + order!.surchargePct / 100) * (1 + (order!.serviceChargePct ?? 0) / 100)).toFixed(2)
   // фикс-сумма скидки на заказ применяется только к полному чеку (как в orderTotal/pay);
   // при оплате по гостю скидка суммой не делится — payByGuest её тоже не учитывает
   const total = guestNo != null ? afterPct : +Math.max(0, afterPct - (order!.discountAmount ?? 0)).toFixed(2)
@@ -264,6 +264,7 @@ export default function PaymentScreen() {
             <Tot k="ПОДЫТОГ" v={formatTenge(sub)} />
             <Tot k="СКИДКА" v={`${order!.discountPct.toFixed(2)}%`} />
             <Tot k="НАДБАВКА" v={`${order!.surchargePct.toFixed(2)}%`} />
+            {order!.serviceChargePct ? <Tot k="СЕРВИСНЫЙ СБОР" v={`${order!.serviceChargePct.toFixed(2)}%`} /> : null}
             {guestNo == null && order!.discountAmount ? <Tot k="СКИДКА СУММОЙ" v={'− ' + formatTenge(order!.discountAmount)} /> : null}
             <Tot k="ПРЕДОПЛАТА" v={prepay > 0 ? '− ' + formatTenge(prepay) : formatTenge(0)} />
             <div className="flex justify-between px-4 py-2 text-2xl font-bold border-t border-black/30"><span>ИТОГО:</span><span>{formatTenge(total)}</span></div>

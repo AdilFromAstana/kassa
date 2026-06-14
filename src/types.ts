@@ -118,6 +118,7 @@ export interface Order {
   discountPct: number
   surchargePct: number
   discountAmount?: number // фикс-сумма скидки на весь заказ, ₸ (после % скидки)
+  serviceChargePct?: number // сервисный сбор (авто-надбавка), снапшот % из настроек при создании заказа
   prepayment?: number     // предоплата/депозит по заказу (напр. из банкета), ₸ — вычитается из суммы к оплате
   loyaltyCardId?: string  // привязанная карта гостя iikoCard (для начисления/списания бонусов)
   openedAt: string
@@ -484,6 +485,7 @@ export interface Establishment {
   iikoCard: boolean      // лояльность
   fiscalBeforePay: boolean // раздельная печать фискального чека перед оплатой (iikoFront 9.x, приходит из офиса)
   frCount: 1 | 2         // число фискальных регистраторов
+  serviceCharge?: { active: boolean; percent: number } // сервисный сбор (авто-надбавка на заказ, раздел 03)
 }
 
 export interface ClosedShift {

@@ -604,6 +604,23 @@ export default function OfficeScreen() {
                 ))}
               </div>
             </div>
+
+            <div className="mt-6">
+              <div className="text-gray-500 text-xs uppercase mb-2">Сервисный сбор (авто-надбавка на заказ, раздел 03)</div>
+              <div className="flex items-center gap-4 bg-white border border-gray-200 rounded-md p-3 max-w-md">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!!est.serviceCharge?.active}
+                    onChange={(e) => setEstablishment({ serviceCharge: { active: e.target.checked, percent: est.serviceCharge?.percent ?? 10 } })} />
+                  Включён
+                </label>
+                <label className="flex items-center gap-2 text-sm ml-auto text-gray-500">Процент, %
+                  <input type="number" min={0} max={100} value={est.serviceCharge?.percent ?? 10}
+                    onChange={(e) => setEstablishment({ serviceCharge: { active: est.serviceCharge?.active ?? false, percent: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) } })}
+                    className="w-20 h-9 rounded border border-gray-300 px-2 text-right" />
+                </label>
+              </div>
+              <div className="text-xs text-gray-400 mt-1">Применяется ко всем новым заказам кассы (снимок % в заказ при открытии). Входит в чек и облагается ҚҚС.</div>
+            </div>
           </div>
         ) : section === 'menu' ? (
           <div className="p-6 max-w-3xl">
