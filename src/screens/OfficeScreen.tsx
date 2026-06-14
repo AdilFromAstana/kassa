@@ -16,6 +16,7 @@ import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield }
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge, vatBreakdown } from '../lib/money'
 import { downloadExcel, xlsNum } from '../lib/export'
+import { buildStockMoves, turnoverByIngredient, reconstructOpening, ingredientLedger } from '../lib/stockMoves'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
 import InputModal from '../components/InputModal'
@@ -167,7 +168,8 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'turnover' | 'movement' | 'torg29' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [moveIng, setMoveIng] = useState(ingredients[0]?.id ?? '') // Движение товара (606): выбранный товар
   const [revCut, setRevCut] = useState<'day' | 'category' | 'waiter' | 'payment' | 'hour'>('payment') // Отчёты по выручке (topic-110): разрез
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [purchMode, setPurchMode] = useState<'bySupplier' | 'byStore'>('bySupplier') // Отчёт о закупках (topic-607): по поставщикам / по складам
@@ -242,6 +244,21 @@ export default function OfficeScreen() {
       downloadExcel('iiko-отчёт-по-блюдам', [['Официант', 'Блюдо', 'Код', '№ заказа', 'Стол', 'Цена', 'Кол-во', 'Полн. сумма', 'Скидка', 'Итог. сумма', 'Тип оплаты', 'Сумма ҚҚС'],
         ...dishDetailRows.map((r) => [r.waiter, r.name, r.code, r.orderId, r.table, xlsNum(r.price), xlsNum(r.qty, 2), xlsNum(r.full), xlsNum(r.disc), xlsNum(r.itog), r.payName, xlsNum(r.vat)]),
         ['Итого', '', '', '', '', '', xlsNum(dishDetailTot.qty, 2), xlsNum(dishDetailTot.full), xlsNum(dishDetailTot.disc), xlsNum(dishDetailTot.itog), '', xlsNum(dishDetailTot.vat)]])
+    } else if (report === 'turnover') {
+      downloadExcel('iiko-товарная-ОСВ', [['Товар', 'Ед.', 'Нач. кол-во', 'Нач. сумма', 'Приход кол-во', 'Приход сумма', 'Расход кол-во', 'Расход сумма', 'Кон. кол-во', 'Кон. сумма'],
+        ...turnover.map((t) => [t.name, t.unit, xlsNum(t.openQty, 3), xlsNum(t.openQty * t.costPerUnit), xlsNum(t.inQty, 3), xlsNum(t.inQty * t.costPerUnit), xlsNum(t.outQty, 3), xlsNum(t.outQty * t.costPerUnit), xlsNum(t.closeQty, 3), xlsNum(t.closeQty * t.costPerUnit)]),
+        ['Итого', '', '', xlsNum(turnoverTot.openSum), '', xlsNum(turnoverTot.inSum), '', xlsNum(turnoverTot.outSum), '', xlsNum(turnoverTot.closeSum)]])
+    } else if (report === 'movement') {
+      downloadExcel(`iiko-движение-${moveIngObj?.name ?? ''}`, [['Дата', 'Тип документа', '№', 'Корреспонденция', 'Расход', 'Приход', 'Остаток', 'Себест/ед', 'Стоимость'],
+        ...moveLedger.map((m) => [m.at, m.docType, m.docNo, m.corr, m.outQty ? xlsNum(m.outQty, 3) : '', m.inQty ? xlsNum(m.inQty, 3) : '', xlsNum(m.balance, 3), xlsNum(m.costPerUnit), xlsNum((m.inQty + m.outQty) * m.costPerUnit)])])
+    } else if (report === 'torg29') {
+      downloadExcel('iiko-товарный-отчёт-ТОРГ-29', [['Раздел', 'Дата', 'Документ', '№', 'Корреспонденция', 'Себестоимость'],
+        ['Остаток на начало', '', '', '', '', xlsNum(torgOpenSum)],
+        ...torgIn.map((d) => ['Приход', d.at, d.docType, d.docNo, d.corr, xlsNum(d.cost)]),
+        ['Итого приход', '', '', '', '', xlsNum(torgInSum)],
+        ...torgOut.map((d) => ['Расход', d.at, d.docType, d.docNo, d.corr, xlsNum(d.cost)]),
+        ['Итого расход', '', '', '', '', xlsNum(torgOutSum)],
+        ['Остаток на конец', '', '', '', '', xlsNum(torgCloseSum)]])
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -358,6 +375,30 @@ export default function OfficeScreen() {
   ]
   const revActive = REV_CUTS.find((c) => c.id === revCut) ?? REV_CUTS[0]
   const revTot = revActive.rows.reduce((t, r) => ({ orders: t.orders + r.orders, guests: t.guests + r.guests, sum: t.sum + r.sum }), { orders: 0, guests: 0, sum: 0 })
+
+  // ── R2: единый журнал складских движений (фундамент товарных отчётов 605/606/615), см. lib/stockMoves ──
+  const stockMoves = buildStockMoves({ invoices, documents, closedOrders, ingredients, techCardOverrides })
+  const stockOpening = reconstructOpening(stockMoves, ingredients)
+  // Расш. товарная ОСВ (605): нач/приход/расход/кон по каждому товару (кол-во + сумма по себестоимости)
+  const turnover = turnoverByIngredient(stockMoves, ingredients).filter((t) => t.openQty || t.inQty || t.outQty || t.closeQty)
+  const turnoverTot = turnover.reduce((a, t) => ({ openSum: a.openSum + t.openQty * t.costPerUnit, inSum: a.inSum + t.inQty * t.costPerUnit, outSum: a.outSum + t.outQty * t.costPerUnit, closeSum: a.closeSum + t.closeQty * t.costPerUnit }), { openSum: 0, inSum: 0, outSum: 0, closeSum: 0 })
+  // Движение товара (606): операции выбранного товара с накопительным остатком
+  const moveLedger = ingredientLedger(stockMoves, stockOpening, moveIng)
+  const moveIngObj = ingredients.find((i) => i.id === moveIng)
+  // Товарный отчёт ТОРГ-29 (615): документы по приходу/расходу с себестоимостью
+  const docMoveType = (m: typeof stockMoves[number]) => m.inQty > 0 ? 'in' : 'out'
+  const torgDocs = Object.values(stockMoves.reduce((acc, m) => {
+    const k = m.docType + '|' + m.docNo
+    const a = (acc[k] ??= { key: k, at: m.at, docType: m.docType, docNo: m.docNo, corr: m.corr, dir: docMoveType(m), cost: 0 })
+    a.cost += (m.inQty + m.outQty) * m.costPerUnit
+    return acc
+  }, {} as Record<string, { key: string; at: string; docType: string; docNo: string; corr: string; dir: string; cost: number }>)).sort((a, b) => a.dir.localeCompare(b.dir) || a.at.localeCompare(b.at))
+  const torgIn = torgDocs.filter((d) => d.dir === 'in')
+  const torgOut = torgDocs.filter((d) => d.dir === 'out')
+  const torgInSum = +torgIn.reduce((s, d) => s + d.cost, 0).toFixed(2)
+  const torgOutSum = +torgOut.reduce((s, d) => s + d.cost, 0).toFixed(2)
+  const torgOpenSum = +ingredients.reduce((s, i) => s + (stockOpening[i.id] ?? 0) * i.costPerUnit, 0).toFixed(2)
+  const torgCloseSum = +(torgOpenSum + torgInSum - torgOutSum).toFixed(2)
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1114,13 +1155,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'revenue' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat') && (
+                {(report !== 'olap' && report !== 'pnl') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'revenue' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report !== 'olap' && report !== 'pnl' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1395,6 +1436,104 @@ export default function OfficeScreen() {
                   </table>
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Где используется ингредиент (по техкартам блюд). Брутто — норма закладки на порцию; нетто/выход — с учётом потерь хол./гор. обработки.</div>
+              </div>
+            )}
+
+            {/* 1h. Расш. товарная ОСВ (topic-605) */}
+            {report === 'turnover' && (
+              <div>
+                <div className="text-xs text-gray-500 mb-3">Обороты по товарам за период: начальный остаток (реконструирован) · приход · расход · конечный остаток. Оценка по текущей себестоимости (мок). Инвариант: нач + приход − расход = кон.</div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto" style={{ maxHeight: '65vh' }}>
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-gray-50"><tr className="text-gray-500 border-b border-gray-200">
+                      <th className="p-2 text-left" rowSpan={2}>Товар</th><th className="text-center border-l border-gray-100" colSpan={2}>Нач. остаток</th><th className="text-center border-l border-gray-100" colSpan={2}>Приход</th><th className="text-center border-l border-gray-100" colSpan={2}>Расход</th><th className="text-center border-l border-gray-100" colSpan={2}>Кон. остаток</th>
+                    </tr><tr className="text-gray-400 text-xs border-b border-gray-200">
+                      <th className="text-right border-l border-gray-100 px-2">Кол-во</th><th className="text-right px-2">Сумма</th><th className="text-right border-l border-gray-100 px-2">Кол-во</th><th className="text-right px-2">Сумма</th><th className="text-right border-l border-gray-100 px-2">Кол-во</th><th className="text-right px-2">Сумма</th><th className="text-right border-l border-gray-100 px-2">Кол-во</th><th className="text-right px-2">Сумма</th>
+                    </tr></thead>
+                    <tbody>
+                      {turnover.length === 0 ? <tr><td colSpan={9} className="p-3 text-gray-400">Нет движений и остатков.</td></tr> : turnover.map((t) => (
+                        <tr key={t.ingredientId} className="border-b border-gray-50">
+                          <td className="p-2"><span className="text-gray-700">{t.name}</span> <span className="text-gray-400 text-xs">{t.unit}</span></td>
+                          <td className="text-right px-2 text-gray-500">{+t.openQty.toFixed(3)}</td><td className="text-right px-2 text-gray-500">{formatTenge(t.openQty * t.costPerUnit)}</td>
+                          <td className="text-right px-2">{t.inQty ? +t.inQty.toFixed(3) : ''}</td><td className="text-right px-2">{t.inQty ? formatTenge(t.inQty * t.costPerUnit) : ''}</td>
+                          <td className="text-right px-2">{t.outQty ? +t.outQty.toFixed(3) : ''}</td><td className="text-right px-2">{t.outQty ? formatTenge(t.outQty * t.costPerUnit) : ''}</td>
+                          <td className={`text-right px-2 font-medium ${t.closeQty < 0 ? 'text-red-600' : ''}`}>{+t.closeQty.toFixed(3)}</td><td className="text-right px-2 font-medium">{formatTenge(t.closeQty * t.costPerUnit)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {turnover.length > 0 && <tfoot><tr className="border-t-2 border-gray-300 font-semibold"><td className="p-2">ИТОГО</td><td /><td className="text-right px-2">{formatTenge(turnoverTot.openSum)}</td><td /><td className="text-right px-2">{formatTenge(turnoverTot.inSum)}</td><td /><td className="text-right px-2">{formatTenge(turnoverTot.outSum)}</td><td /><td className="text-right px-2">{formatTenge(turnoverTot.closeSum)}</td></tr></tfoot>}
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 1i. Движение товара (topic-606) */}
+            {report === 'movement' && (() => {
+              const docCls: Record<string, string> = { 'Приходная накладная': 'bg-emerald-50', 'Акт списания': 'bg-rose-50', 'Расходная накладная': 'bg-sky-50', 'Внутреннее перемещение': 'bg-violet-50', 'Реализация': '', 'Инвентаризация': 'font-medium' }
+              return (
+                <div>
+                  <div className="flex items-center gap-2 mb-3 text-sm">
+                    <span className="text-gray-500">Товар:</span>
+                    <select value={moveIng} onChange={(e) => setMoveIng(e.target.value)} className="h-9 rounded border border-gray-300 px-2 min-w-[220px]">
+                      {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+                    </select>
+                    <span className="ml-auto text-gray-500">Операций: <b className="text-gray-800">{moveLedger.length}</b></span>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto" style={{ maxHeight: '65vh' }}>
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-white"><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">Дата</th><th>Тип документа</th><th>№</th><th>Корреспонденция</th><th className="text-right">Расход</th><th className="text-right">Приход</th><th className="text-right">Остаток</th><th className="text-right">Себест/ед</th><th className="text-right p-2">Стоимость</th>
+                      </tr></thead>
+                      <tbody>
+                        {moveLedger.length === 0 ? <tr><td colSpan={9} className="p-3 text-gray-400">Нет операций по «{moveIngObj?.name}».</td></tr> : moveLedger.map((m, i) => (
+                          <tr key={i} className={`border-b border-gray-50 ${docCls[m.docType] ?? ''}`}>
+                            <td className="p-2 text-gray-500 text-xs whitespace-nowrap">{m.at}</td>
+                            <td>{m.docType}</td>
+                            <td className="text-gray-500">{m.docNo}</td>
+                            <td className="text-gray-600 text-xs">{m.corr}</td>
+                            <td className="text-right text-rose-700">{m.outQty ? +m.outQty.toFixed(3) : ''}</td>
+                            <td className="text-right text-emerald-700">{m.inQty ? +m.inQty.toFixed(3) : ''}</td>
+                            <td className={`text-right font-medium ${m.balance < 0 ? 'text-red-600' : ''}`}>{+m.balance.toFixed(3)}</td>
+                            <td className="text-right text-gray-500">{formatTenge(m.costPerUnit)}</td>
+                            <td className="text-right p-2 text-gray-600">{formatTenge((m.inQty + m.outQty) * m.costPerUnit)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">Цвет строки — тип документа (приход зелёный, списание розовый, расходная голубой, перемещение фиолетовый). Красный остаток — отрицательный. Один склад (перемещение — мок-упрощение).</div>
+                </div>
+              )
+            })()}
+
+            {/* 1j. Товарный отчёт ТОРГ-29 (topic-615) */}
+            {report === 'torg29' && (
+              <div className="max-w-3xl">
+                <div className="text-xs text-gray-500 mb-3">Движение товаров по документам (форма ТОРГ-29): остаток на начало → приход → расход → остаток на конец, по себестоимости.</div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                  <div className="flex justify-between px-4 py-2 bg-gray-50 font-medium border-b border-gray-200"><span>Остаток на начало периода</span><span>{formatTenge(torgOpenSum)}</span></div>
+                  <div className="px-4 py-1.5 text-emerald-700 text-xs uppercase bg-emerald-50/40">Приход</div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {torgIn.length === 0 ? <tr><td className="px-4 py-2 text-gray-400">— нет приходных документов —</td></tr> : torgIn.map((d) => (
+                        <tr key={d.key} className="border-b border-gray-50"><td className="px-4 py-1.5 text-gray-400 text-xs w-28">{d.at.split(',')[0]}</td><td>{d.docType} {d.docNo}</td><td className="text-gray-500 text-xs">{d.corr}</td><td className="text-right px-4 w-32">{formatTenge(d.cost)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-between px-4 py-1.5 font-medium border-y border-gray-100"><span>Итого приход</span><span>{formatTenge(torgInSum)}</span></div>
+                  <div className="flex justify-between px-4 py-1.5 text-gray-500"><span>Итого приход с остатком</span><span>{formatTenge(torgOpenSum + torgInSum)}</span></div>
+                  <div className="px-4 py-1.5 text-rose-700 text-xs uppercase bg-rose-50/40">Расход</div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {torgOut.length === 0 ? <tr><td className="px-4 py-2 text-gray-400">— нет расходных документов —</td></tr> : torgOut.map((d) => (
+                        <tr key={d.key} className="border-b border-gray-50"><td className="px-4 py-1.5 text-gray-400 text-xs w-28">{d.at.split(',')[0]}</td><td>{d.docType} {d.docNo}</td><td className="text-gray-500 text-xs">{d.corr}</td><td className="text-right px-4 w-32">{formatTenge(d.cost)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-between px-4 py-1.5 font-medium border-y border-gray-100"><span>Итого расход</span><span>{formatTenge(torgOutSum)}</span></div>
+                  <div className="flex justify-between px-4 py-2 bg-gray-50 font-semibold"><span>Остаток на конец периода</span><span>{formatTenge(torgCloseSum)}</span></div>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Остаток на конец = остаток на начало + итого приход − итого расход. Себестоимость — по текущей оценке (мок).</div>
               </div>
             )}
 
