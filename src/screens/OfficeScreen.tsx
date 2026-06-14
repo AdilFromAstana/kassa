@@ -17,6 +17,8 @@ import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge, vatBreakdown } from '../lib/money'
 import { downloadExcel, xlsNum } from '../lib/export'
 import { buildStockMoves, turnoverByIngredient, reconstructOpening, ingredientLedger } from '../lib/stockMoves'
+import PivotTable from '../components/PivotTable'
+import type { PivotMeasure } from '../lib/pivot'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
 import InputModal from '../components/InputModal'
@@ -168,7 +170,7 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'turnover' | 'movement' | 'torg29' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'turnover' | 'movement' | 'torg29' | 'stock' | 'vat' | 'olap' | 'custom' | 'postings' | 'pnl'>('sales')
   const [moveIng, setMoveIng] = useState(ingredients[0]?.id ?? '') // Движение товара (606): выбранный товар
   const [revCut, setRevCut] = useState<'day' | 'category' | 'waiter' | 'payment' | 'hour'>('payment') // Отчёты по выручке (topic-110): разрез
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
@@ -399,6 +401,20 @@ export default function OfficeScreen() {
   const torgOutSum = +torgOut.reduce((s, d) => s + d.cost, 0).toFixed(2)
   const torgOpenSum = +ingredients.reduce((s, i) => s + (stockOpening[i.id] ?? 0) * i.costPerUnit, 0).toFixed(2)
   const torgCloseSum = +(torgOpenSum + torgInSum - torgOutSum).toFixed(2)
+
+  // Настраиваемый отчёт (616): OLAP по складским движениям (грейн = операция). Через lib/pivot + PivotTable.
+  type PFact = Record<string, unknown>
+  const customFacts: PFact[] = stockMoves.map((m) => ({
+    ingredient: ingredients.find((i) => i.id === m.ingredientId)?.name ?? m.ingredientId,
+    opType: m.docType, corr: m.corr, store: m.store, inQty: m.inQty, outQty: m.outQty, costPerUnit: m.costPerUnit,
+  }))
+  const CUSTOM_DIMS = [{ key: 'ingredient', label: 'Товар' }, { key: 'opType', label: 'Тип операции' }, { key: 'corr', label: 'Контрагент/блюдо' }, { key: 'store', label: 'Склад' }]
+  const CUSTOM_MEASURES: PivotMeasure<PFact>[] = [
+    { id: 'in', label: 'Приход (кол-во)', value: (fs) => +fs.reduce((s, f) => s + Number(f.inQty), 0).toFixed(3) },
+    { id: 'out', label: 'Расход (кол-во)', value: (fs) => +fs.reduce((s, f) => s + Number(f.outQty), 0).toFixed(3) },
+    { id: 'sumIn', label: 'Сумма прихода', money: true, value: (fs) => +fs.reduce((s, f) => s + Number(f.inQty) * Number(f.costPerUnit), 0).toFixed(2) },
+    { id: 'sumOut', label: 'Сумма расхода', money: true, value: (fs) => +fs.reduce((s, f) => s + Number(f.outQty) * Number(f.costPerUnit), 0).toFixed(2) },
+  ]
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1155,13 +1171,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP по продажам' }, { id: 'custom', label: 'Настраиваемый' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report !== 'olap' && report !== 'pnl') && (
+                {!['olap', 'pnl', 'custom', 'postings'].includes(report) && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report !== 'olap' && report !== 'pnl' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${!['olap', 'pnl', 'custom', 'postings'].includes(report) ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1605,6 +1621,16 @@ export default function OfficeScreen() {
 
             {/* 3. OLAP-куб (сводная таблица) */}
             {report === 'olap' && <OfficeOlap />}
+
+            {/* 3b. Настраиваемый отчёт (topic-616) — OLAP по складским движениям */}
+            {report === 'custom' && (
+              <div>
+                <div className="text-xs text-gray-500 mb-3">Свой отчёт по движению ТМЦ: перетащите измерения в строки/колонки, выберите показатели. Грейн — складская операция (приход/расход). Источник — единый журнал движений.</div>
+                <PivotTable facts={customFacts} dims={CUSTOM_DIMS} measures={CUSTOM_MEASURES}
+                  initialRows={['ingredient']} initialCols={['opType']} excelName="iiko-настраиваемый-отчёт"
+                  note="Фильтры по значениям и сохранённые виды — бэклог. Тип операции: Приходная накладная / Акт списания / Реализация / Инвентаризация и т.д." />
+              </div>
+            )}
 
             {/* 4. P&L */}
             {report === 'pnl' && (
