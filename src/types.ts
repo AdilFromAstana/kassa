@@ -328,6 +328,12 @@ export interface Invoice {
   kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
 }
 
+// ───────── Бухгалтерия: двойная запись (модуль 07) ─────────
+// Счёт плана счетов РК. kind: A=актив, P=пассив/капитал, I=доход, E=расход.
+export interface Account { code: string; name: string; kind: 'A' | 'P' | 'I' | 'E'; section: string }
+// Проводка (двойная запись): Дт debit / Кт credit на amount.
+export interface JournalEntry { id: string; date: string; debit: string; credit: string; amount: number; desc: string; source: 'opening' | 'auto' | 'manual' }
+
 // ───────── Корпорация (модуль 02) ─────────
 export interface CorpSettings {
   name: string

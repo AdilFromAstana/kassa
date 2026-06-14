@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings, CorpSettings, Concept, DocNumber, SyncPoint } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings, CorpSettings, Concept, DocNumber, SyncPoint, Account } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -79,6 +79,25 @@ export const clubCardSeed: ClubCard[] = [
 ]
 
 // iikoCard — бонусная программа лояльности (модуль 15) + карты гостей с балансом бонусов.
+// ───────── Бухгалтерия: план счетов РК + начальные сальдо (модуль 07) ─────────
+export const chartOfAccountsSeed: Account[] = [
+  { code: '1010', name: 'Денежные средства в кассе', kind: 'A', section: 'Оборотные активы' },
+  { code: '1030', name: 'Денежные средства на текущих банковских счетах', kind: 'A', section: 'Оборотные активы' },
+  { code: '1330', name: 'Товары и запасы', kind: 'A', section: 'Оборотные активы' },
+  { code: '1420', name: 'НДС к возмещению (входящий ҚҚС)', kind: 'A', section: 'Оборотные активы' },
+  { code: '3130', name: 'НДС к уплате (ҚҚС)', kind: 'P', section: 'Краткосрочные обязательства' },
+  { code: '3310', name: 'Краткосрочная задолженность поставщикам', kind: 'P', section: 'Краткосрочные обязательства' },
+  { code: '3350', name: 'Краткосрочная задолженность по оплате труда', kind: 'P', section: 'Краткосрочные обязательства' },
+  { code: '5610', name: 'Нераспределённая прибыль (капитал)', kind: 'P', section: 'Капитал' },
+  { code: '6010', name: 'Доход от реализации продукции и услуг', kind: 'I', section: 'Доходы' },
+  { code: '7010', name: 'Себестоимость реализованной продукции', kind: 'E', section: 'Расходы' },
+  { code: '7210', name: 'Административные расходы', kind: 'E', section: 'Расходы' },
+]
+// Начальные сальдо (по натуральной стороне счёта). Σ активов = Σ пассивов (баланс сходится).
+export const openingBalancesSeed: Record<string, number> = {
+  '1010': 50000, '1030': 2000000, '1330': 1500000, '3310': 800000, '5610': 2750000,
+}
+
 // ───────── Корпорация (модуль 02) ─────────
 export const corpSettingsSeed: CorpSettings = { name: 'Сеть «Mumtaz»', bin: '123456789012', currency: 'тенге', symbol: '₸', precision: 2, roundToWhole: false }
 export const conceptsSeed: Concept[] = [

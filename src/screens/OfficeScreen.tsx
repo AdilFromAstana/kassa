@@ -7,6 +7,7 @@ import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance } from '../mock/data'
 import OfficeDelivery from './OfficeDelivery'
 import OfficeCorp from './OfficeCorp'
+import OfficeLedger from './OfficeLedger'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -147,7 +148,7 @@ export default function OfficeScreen() {
   const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
   const [newCat, setNewCat] = useState('')
   const [journalCat, setJournalCat] = useState<string>('all') // фильтр журнала событий
-  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow'>('book')
+  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'ledger'>('book')
   const [newLc, setNewLc] = useState({ number: '', owner: '', phone: '' })
   const [adminTab, setAdminTab] = useState<'license' | 'print' | 'devices' | 'db'>('license')
   const [rightSearch, setRightSearch] = useState('')
@@ -1434,12 +1435,12 @@ export default function OfficeScreen() {
               Источник — наличные продажи, внесения/изъятия (вкл. инкассацию и выплаты ЗП), возвраты наличными, разменный фонд смены.
             </div>
             <div className="flex gap-1 mb-4 border-b border-gray-200">
-              {([['book', 'Кассовая книга'], ['cashflow', 'ДДС (приток/отток)']] as const).map(([id, label]) => (
+              {([['book', 'Кассовая книга'], ['cashflow', 'ДДС (приток/отток)'], ['ledger', 'Бухучёт (план/проводки/ОСВ/баланс)']] as const).map(([id, label]) => (
                 <button key={id} onClick={() => setFinanceTab(id)}
                   className={`px-4 h-10 text-sm -mb-px border-b-2 ${financeTab === id ? 'border-emerald-500 text-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>{label}</button>
               ))}
             </div>
-            {(() => {
+            {financeTab === 'ledger' ? <OfficeLedger /> : (() => {
               const opening = cashShift?.openingCash ?? 0
               const cashSalesRows = closedOrders.map((o) => ({ at: o.paidAt, label: `Продажа · чек №${o.id} (нал.)`, in: o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((s, p) => s + p.amount, 0), out: 0 })).filter((r) => r.in > 0)
               const mvRows = cashMovements.map((m) => ({ at: m.at, label: `${m.kind === 'in' ? 'Внесение' : 'Изъятие'} · ${m.type}${m.comment ? ' · ' + m.comment : ''}`, in: m.kind === 'in' ? m.amount : 0, out: m.kind === 'out' ? m.amount : 0 }))

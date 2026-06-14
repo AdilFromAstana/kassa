@@ -5,7 +5,7 @@ import type {
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
   MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice,
   DeliveryCustomer, Courier, DeliveryOrder, DeliveryStatus, DeliverySettings, DeliveryItem,
-  CorpSettings, Concept, DocNumber, SyncPoint,
+  CorpSettings, Concept, DocNumber, SyncPoint, JournalEntry,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
@@ -348,6 +348,7 @@ interface PosState {
   concepts: Concept[]          // концепции (бренд/тип обслуживания)
   docNumbering: DocNumber[]    // шаблоны нумерации документов
   syncMonitor: SyncPoint[]     // монитор синхронизации ЦО↔ТП
+  manualPostings: JournalEntry[] // ручные бухгалтерские проводки (двойная запись)
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -422,6 +423,9 @@ interface PosState {
   removeConcept: (id: string) => void
   setDocTemplate: (id: string, template: string) => void
   requestSync: (id: string) => void
+  // бухгалтерия (модуль 07): ручные проводки
+  addPosting: (e: { date: string; debit: string; credit: string; amount: number; desc: string }) => void
+  removePosting: (id: string) => void
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -580,6 +584,7 @@ export const usePos = create<PosState>((set, get) => ({
   concepts: loadAdmin('iiko-concepts', conceptsSeed.map((c) => ({ ...c }))),
   docNumbering: loadAdmin('iiko-doc-numbering', docNumberingSeed.map((d) => ({ ...d }))),
   syncMonitor: syncMonitorSeed.map((p) => ({ ...p })),
+  manualPostings: loadAdmin<JournalEntry[]>('iiko-postings', []),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -902,6 +907,19 @@ export const usePos = create<PosState>((set, get) => ({
   requestSync: (id) => set((st) => ({
     syncMonitor: st.syncMonitor.map((p) => (p.id === id ? { ...p, status: 'ok' as const, lastExport: fullNow(), lastImport: fullNow() } : p)),
   })),
+  // ───────── Бухгалтерия: ручные проводки ─────────
+  addPosting: (e) => set((st) => {
+    const next = st.manualPostings.reduce((m, x) => Math.max(m, +(x.id.replace('jm-', '')) || 0), 0) + 1
+    const entry: JournalEntry = { id: 'jm-' + next, ...e, source: 'manual' }
+    const list = [entry, ...st.manualPostings]
+    persistAdmin('iiko-postings', list)
+    return { manualPostings: list }
+  }),
+  removePosting: (id) => set((st) => {
+    const list = st.manualPostings.filter((e) => e.id !== id)
+    persistAdmin('iiko-postings', list)
+    return { manualPostings: list }
+  }),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
   })),
