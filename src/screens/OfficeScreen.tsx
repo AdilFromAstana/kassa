@@ -167,7 +167,7 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
   const addPLine = () => {
@@ -210,6 +210,10 @@ export default function OfficeScreen() {
     } else if (report === 'sales') {
       downloadExcel('iiko-продажи-по-дням', [['Дата', 'Чеков', 'Выручка', 'Средний чек'],
         ...salesByDay.map((d) => [d.day, d.checks, xlsNum(d.rev), xlsNum(d.rev / d.checks)])])
+    } else if (report === 'avg') {
+      downloadExcel('iiko-средний-чек', [['Дата', 'Чеков', 'Гостей', 'Продажи', 'Средний чек', 'Средний заказ гостя', 'Ср. гостей на заказ'],
+        ...avgByDay.map((d) => [d.day, d.checks, d.guests, xlsNum(d.sales), xlsNum(avgCheck(d.sales, d.checks)), xlsNum(avgGuestOrder(d.sales, d.guests)), xlsNum(avgGuestsPer(d.sales, d.checks, d.guests))]),
+        ['Итого', avgTot.checks, avgTot.guests, xlsNum(avgTot.sales), xlsNum(avgCheck(avgTot.sales, avgTot.checks)), xlsNum(avgGuestOrder(avgTot.sales, avgTot.guests)), xlsNum(avgGuestsPer(avgTot.sales, avgTot.checks, avgTot.guests))]])
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -241,6 +245,20 @@ export default function OfficeScreen() {
     a.checks++; a.rev += o.total
     return acc
   }, {} as Record<string, { day: string; checks: number; rev: number }>))
+
+  // Отчёт о среднем чеке (topic-603): по учётным дням периода — чеки/гости/продажи + средние.
+  // Чеки = закрытые заказы (в моке «за счёт заведения» нет); возвраты — отдельный возвратный чек, заказ остаётся.
+  const avgByDay = Object.values(closedOrders.reduce((acc, o) => {
+    const k = dayKey(o.paidAt)
+    const a = (acc[k] ??= { day: k, checks: 0, guests: 0, sales: 0 })
+    a.checks++; a.guests += o.guests; a.sales += o.total
+    return acc
+  }, {} as Record<string, { day: string; checks: number; guests: number; sales: number }>))
+  const avgTot = avgByDay.reduce((t, d) => ({ checks: t.checks + d.checks, guests: t.guests + d.guests, sales: t.sales + d.sales }), { checks: 0, guests: 0, sales: 0 })
+  // формулы 1:1: Средний чек = Продажи/Чеки · Средний заказ гостя = Продажи/Гости · Ср. гостей на заказ = Ср.чек/Ср.заказ (= Гости/Чеки)
+  const avgCheck = (s: number, c: number) => (c ? s / c : 0)
+  const avgGuestOrder = (s: number, g: number) => (g ? s / g : 0)
+  const avgGuestsPer = (s: number, c: number, g: number) => { const ac = avgCheck(s, c), ag = avgGuestOrder(s, g); return ag ? ac / ag : 0 }
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -997,13 +1015,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1052,6 +1070,45 @@ export default function OfficeScreen() {
                     </table>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* 1b. Отчёт о среднем чеке (topic-603) */}
+            {report === 'avg' && (
+              <div>
+                <div className="text-xs text-gray-500 mb-3">Посещаемость и покупательная способность по учётным дням. Детализация — по дням (период = текущая смена, мок). Формулы 1:1 с iiko.</div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Дата</th><th className="text-right">Чеков</th><th className="text-right">Гостей</th><th className="text-right">Продажи</th><th className="text-right">Средний чек</th><th className="text-right">Средний заказ гостя</th><th className="text-right p-2">Ср. гостей на заказ</th>
+                    </tr></thead>
+                    <tbody>
+                      {avgByDay.length === 0 ? <tr><td colSpan={7} className="p-3 text-gray-400">Нет продаж.</td></tr> : avgByDay.map((d) => (
+                        <tr key={d.day} className="border-b border-gray-100 last:border-0">
+                          <td className="p-2">{d.day}</td>
+                          <td className="text-right">{d.checks}</td>
+                          <td className="text-right">{d.guests}</td>
+                          <td className="text-right">{formatTenge(d.sales)}</td>
+                          <td className="text-right">{formatTenge(avgCheck(d.sales, d.checks))}</td>
+                          <td className="text-right text-gray-600">{formatTenge(avgGuestOrder(d.sales, d.guests))}</td>
+                          <td className="text-right p-2 text-gray-600">{avgGuestsPer(d.sales, d.checks, d.guests).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {avgByDay.length > 0 && (
+                      <tfoot><tr className="border-t border-gray-200 font-semibold">
+                        <td className="p-2">Итого</td>
+                        <td className="text-right">{avgTot.checks}</td>
+                        <td className="text-right">{avgTot.guests}</td>
+                        <td className="text-right">{formatTenge(avgTot.sales)}</td>
+                        <td className="text-right">{formatTenge(avgCheck(avgTot.sales, avgTot.checks))}</td>
+                        <td className="text-right">{formatTenge(avgGuestOrder(avgTot.sales, avgTot.guests))}</td>
+                        <td className="text-right p-2">{avgGuestsPer(avgTot.sales, avgTot.checks, avgTot.guests).toFixed(2)}</td>
+                      </tr></tfoot>
+                    )}
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Средний чек = Продажи / Чеки · Средний заказ гостя = Продажи / Гости · Ср. гостей на заказ = Средний чек / Средний заказ гостя.</div>
               </div>
             )}
 
