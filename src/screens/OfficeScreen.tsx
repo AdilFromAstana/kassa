@@ -25,6 +25,7 @@ import type { PivotMeasure } from '../lib/pivot'
 import { buildAutoPostings } from '../lib/ledger'
 import { chartOfAccountsSeed } from '../mock/data'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
+import { plannedHours } from '../lib/schedule'
 import CalendarModal from '../components/CalendarModal'
 import InputModal from '../components/InputModal'
 import Tabs from '../components/Tabs'
@@ -121,7 +122,7 @@ export default function OfficeScreen() {
     salaryPayouts, paySalary, cashMovements, writeOffs, cashShift,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
     orderTypes, addOrderType, updateOrderType, removeOrderType, setDefaultOrderType,
-    shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck, payProfiles, setPayProfile,
+    shiftTypes, addShiftType, removeShiftType, shiftSchedule, setShiftAssignment, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction, manualPostings } = usePos()
@@ -1072,6 +1073,43 @@ export default function OfficeScreen() {
               <input type="time" value={newSh.to} onChange={(e) => setNewSh({ ...newSh, to: e.target.value })} className="h-9 rounded border border-gray-300 px-2" />
               <button onClick={() => { if (newSh.name.trim()) { addShiftType(newSh.name.trim(), newSh.from, newSh.to); setNewSh({ name: '', from: '09:00', to: '18:00' }) } }} className="h-9 px-4 rounded bg-emerald-500 text-white text-sm">Добавить смену</button>
             </div>
+
+            {/* Расписание смен (06): сотрудник × 7 дней */}
+            <div className="text-gray-500 text-xs uppercase mb-2">Расписание смен (на неделю)</div>
+            {(() => {
+              const days = Array.from({ length: 7 }, (_, i) => addDaysISO(todayISO(), i))
+              return (
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto mb-6">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Сотрудник</th>
+                      {days.map((d) => <th key={d} className="text-center font-medium text-xs px-1">{formatRu(d).slice(0, 5)}</th>)}
+                      <th className="text-right p-2">План, ч</th>
+                    </tr></thead>
+                    <tbody>
+                      {staffList.map((s) => {
+                        const assigns = shiftSchedule[s.id] ?? {}
+                        return (
+                          <tr key={s.id} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2 whitespace-nowrap">{s.name}</td>
+                            {days.map((d) => (
+                              <td key={d} className="text-center p-1">
+                                <select value={assigns[d] ?? ''} onChange={(e) => setShiftAssignment(s.id, d, e.target.value || undefined)}
+                                  className="h-8 rounded border border-gray-200 px-1 text-xs max-w-[120px]">
+                                  <option value="">—</option>
+                                  {shiftTypes.map((st) => <option key={st.id} value={st.id}>{st.name} {st.from}–{st.to}</option>)}
+                                </select>
+                              </td>
+                            ))}
+                            <td className="text-right p-2 font-medium">{plannedHours(assigns, shiftTypes)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
 
             {/* Phase 5: медкнижки (сроки) */}
             <div className="text-gray-500 text-xs uppercase mb-2">Медкнижки (сроки действия)</div>

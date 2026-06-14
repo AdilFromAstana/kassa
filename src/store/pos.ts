@@ -145,6 +145,12 @@ function loadShiftTypes(): ShiftType[] {
   return [{ id: 'sh-day', name: 'Дневная', from: '09:00', to: '18:00' }, { id: 'sh-eve', name: 'Вечерняя', from: '14:00', to: '23:00' }]
 }
 function persistShiftTypes(list: ShiftType[]) { void repo.saveConfig('iiko-shift-types', list) }
+// Расписание смен (06): staffId → дата(ISO) → id типа смены.
+function loadShiftSchedule(): Record<string, Record<string, string>> {
+  try { const raw = localStorage.getItem('iiko-shift-schedule'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistShiftSchedule(m: Record<string, Record<string, string>>) { void repo.saveConfig('iiko-shift-schedule', m) }
 function loadMedChecks(): Record<string, string> {
   try { const raw = localStorage.getItem('iiko-med-checks'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
@@ -346,6 +352,7 @@ interface PosState {
   salaryPayoutSeq: number
   orderTypes: OrderTypeDef[] // типы заказов (Розничные продажи, topic-112) — режим/налог/по умолчанию
   shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
+  shiftSchedule: Record<string, Record<string, string>> // расписание: staffId → дата(ISO) → id типа смены
   medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
   payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
   loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard: мастер-переключатель (офис → касса)
@@ -523,6 +530,7 @@ interface PosState {
   setDefaultOrderType: (id: string) => void
   addShiftType: (name: string, from: string, to: string) => void
   removeShiftType: (id: string) => void
+  setShiftAssignment: (staffId: string, date: string, shiftTypeId: string | undefined) => void
   setMedCheck: (staffId: string, expiry: string) => void
   setPayProfile: (staffId: string, patch: { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }) => void
   addCashOpType: (c: Omit<CashOpType, 'id'>) => void
@@ -600,6 +608,7 @@ export const usePos = create<PosState>((set, get) => ({
   salaryPayoutSeq: loadSalary().length,
   orderTypes: loadOrderTypes(),
   shiftTypes: loadShiftTypes(),
+  shiftSchedule: loadShiftSchedule(),
   medChecks: loadMedChecks(),
   payProfiles: loadPayProfiles(),
   loyaltyProgram: loadLoyaltyProgram(),
@@ -1459,6 +1468,13 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.shiftTypes.filter((s) => s.id !== id)
     persistShiftTypes(list)
     return { shiftTypes: list }
+  }),
+  setShiftAssignment: (staffId, date, shiftTypeId) => set((st) => {
+    const forStaff = { ...(st.shiftSchedule[staffId] ?? {}) }
+    if (shiftTypeId) forStaff[date] = shiftTypeId; else delete forStaff[date]
+    const next = { ...st.shiftSchedule, [staffId]: forStaff }
+    persistShiftSchedule(next)
+    return { shiftSchedule: next }
   }),
   setMedCheck: (staffId, expiry) => set((st) => {
     const m = { ...st.medChecks, [staffId]: expiry }
