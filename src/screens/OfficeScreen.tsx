@@ -13,6 +13,7 @@ import OfficeLoyalty from './OfficeLoyalty'
 import OfficeJournal from './OfficeJournal'
 import OfficeAdmin from './OfficeAdmin'
 import OfficeContractors from './OfficeContractors'
+import OfficeExchange from './OfficeExchange'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge, vatBreakdown } from '../lib/money'
@@ -44,7 +45,7 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'corp' | 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'contractors' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'admin'
+type Section = 'corp' | 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'contractors' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'exchange' | 'admin'
 const NAV: { id: Section; label: string }[] = [
   { id: 'corp', label: 'Корпорация' },
   { id: 'settings', label: 'Настройки заведения' },
@@ -62,6 +63,7 @@ const NAV: { id: Section; label: string }[] = [
   { id: 'finance', label: 'Финансы (касс. книга / ДДС)' },
   { id: 'reports', label: 'Отчёты' },
   { id: 'journal', label: 'Журнал событий' },
+  { id: 'exchange', label: 'Обмен данными' },
   { id: 'admin', label: 'Администрирование' },
 ]
 const SECTION_TITLE: Record<Section, string> = {
@@ -74,6 +76,7 @@ const SECTION_TITLE: Record<Section, string> = {
   staff: 'Сотрудники и права', stock: 'Номенклатура и техкарты', contractors: 'Контрагенты — взаиморасчёты и акт сверки', accounting: 'Бухгалтерия (KZ)', payroll: 'Зарплата (KZ)', reports: 'Отчёты',
   finance: 'Финансы — кассовая книга и ДДС (движение денежных средств)',
   journal: 'Журнал событий — монитор операций',
+  exchange: 'Обмен данными — справочник проводок и выгрузка в 1С',
   admin: 'Администрирование — лицензии, печатные формы, устройства, обслуживание БД',
 }
 
@@ -98,9 +101,9 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'admin'],
-  'Управляющий': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
-  'Бухгалтер': ['contractors', 'accounting', 'payroll', 'finance', 'reports', 'stock'],
+  'Администратор': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange', 'admin'],
+  'Управляющий': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange'],
+  'Бухгалтер': ['contractors', 'accounting', 'payroll', 'finance', 'reports', 'stock', 'exchange'],
 }
 
 export default function OfficeScreen() {
@@ -2047,6 +2050,8 @@ export default function OfficeScreen() {
           <OfficeDelivery />
         ) : section === 'contractors' ? (
           <OfficeContractors />
+        ) : section === 'exchange' ? (
+          <OfficeExchange />
         ) : section === 'admin' ? (
           <OfficeAdmin />
         ) : null}

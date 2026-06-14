@@ -55,3 +55,13 @@ describe('Бэк-офис → Контрагенты: смоук рендера'
     expect(screen.getByText('Продажи (исх.)')).toBeTruthy()
   })
 })
+
+describe('Бэк-офис → Обмен данными: смоук рендера', () => {
+  it('раздел открывается; справочник проводок и вкладка выгрузки рендерятся', () => {
+    render(<MemoryRouter><OfficeScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Обмен данными' }))
+    expect(screen.getByRole('button', { name: 'Справочник проводок' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Выгрузка в 1С' }))
+    expect(screen.getByText('Проводок к выгрузке')).toBeTruthy()
+  })
+})
