@@ -125,7 +125,8 @@ export default function OfficeScreen() {
     shiftTypes, addShiftType, removeShiftType, shiftSchedule, setShiftAssignment, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
-    motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction, manualPostings } = usePos()
+    motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction, manualPostings,
+    quickMenuPages, setGroupPage } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   // профиль оплаты сотрудника берётся из стора (офис правит → касса видит то же)
@@ -626,6 +627,28 @@ export default function OfficeScreen() {
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               Цены меню. Изменённая цена сразу применяется на кассе (для новых позиций в заказе). Услуги без цены тоже здесь.
+            </div>
+
+            {/* Быстрое меню (05): раскладка групп по страницам кассы (I/II/III) */}
+            <div className="mb-6">
+              <div className="text-gray-500 text-xs uppercase mb-2">Быстрое меню — страницы кассы (I / II / III)</div>
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                {menuGroups.map((g) => {
+                  const page = quickMenuPages[g.id] ?? g.page
+                  return (
+                    <div key={g.id} className="flex items-center gap-3 px-4 h-12 border-b border-gray-100 last:border-0">
+                      <span className="flex-1">{g.name}</span>
+                      <div className="flex gap-1">
+                        {[1, 2, 3].map((p) => (
+                          <button key={p} onClick={() => setGroupPage(g.id, p)}
+                            className={`w-9 h-8 rounded text-sm ${page === p ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-600'}`}>{p === 1 ? 'I' : p === 2 ? 'II' : 'III'}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">Назначение страницы группы на кассе (кнопки I/II/III в экране заказа). Применяется сразу.</div>
             </div>
 
             {/* ценовые категории (прайс-листы по категории гостя/карты) */}

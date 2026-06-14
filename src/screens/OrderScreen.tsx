@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Search, Home, X, MoreVertical, Scissors, Plus, Receipt, ReceiptText, Users, Menu, Lock, UserRound, Calculator, Power, Printer, MessageSquare } from 'lucide-react'
 import { usePos, lineTotal, orderSubtotal, orderTotal, isStopped } from '../store/pos'
-import { groupsByPage, dishesByGroup, findDish } from '../mock/menu'
+import { menuGroups, dishesByGroup, findDish } from '../mock/menu'
+import { groupsForPage } from '../lib/quickMenu'
 import { dishMaxPortions } from '../mock/warehouse'
 import { formatTenge } from '../lib/money'
 import { redeemLimitPctOf } from '../lib/loyalty'
@@ -242,7 +243,7 @@ export default function OrderScreen() {
           <div className="flex-1 overflow-auto p-1">
             <div className="grid grid-cols-3 gap-1 auto-rows-[6rem]">
               {groupId === null
-                ? groupsByPage(page).map((g) => (
+                ? groupsForPage(menuGroups, pos.quickMenuPages, page).map((g) => (
                     <button key={g.id} className="tile tile-group" onClick={() => setGroupId(g.id)}>{g.name}</button>
                   ))
                 : dishesByGroup(groupId).map((d) => {
