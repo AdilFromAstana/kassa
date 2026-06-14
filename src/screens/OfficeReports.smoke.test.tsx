@@ -45,3 +45,13 @@ describe('Бэк-офис → Отчёты: смоук рендера', () => {
     expect(screen.getByText('Ср. гостей на заказ')).toBeTruthy()
   })
 })
+
+describe('Бэк-офис → Контрагенты: смоук рендера', () => {
+  it('раздел открывается и показывает взаиморасчёты + акт сверки', () => {
+    render(<MemoryRouter><OfficeScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Контрагенты' }))
+    expect(screen.getByText(/Акт сверки/)).toBeTruthy()
+    expect(screen.getByText('Закупки (вх.)')).toBeTruthy()
+    expect(screen.getByText('Продажи (исх.)')).toBeTruthy()
+  })
+})
