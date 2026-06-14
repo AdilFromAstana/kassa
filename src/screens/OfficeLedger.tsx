@@ -2,11 +2,10 @@ import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { usePos } from '../store/pos'
 import { chartOfAccountsSeed as CHART, openingBalancesSeed as OPENING } from '../mock/data'
-import { dishCost } from '../mock/warehouse'
-import { formatTenge, vatAmount } from '../lib/money'
+import { formatTenge } from '../lib/money'
+import { buildAutoPostings } from '../lib/ledger'
 import { todayISO } from '../lib/date'
 import Tabs from '../components/Tabs'
-import type { JournalEntry } from '../types'
 
 // Бухгалтерия (модуль 07): двойная запись — план счетов РК, авто-проводки от операций кассы/закупок/ЗП,
 // ручные проводки, оборотно-сальдовая ведомость (ОСВ) и баланс. Σ Дт всегда = Σ Кт.
@@ -19,39 +18,8 @@ export default function OfficeLedger() {
   const [tab, setTab] = useState<Tab>('journal')
   const [form, setForm] = useState({ date: todayISO(), debit: '1010', credit: '6010', amount: '', desc: '' })
 
-  // ── авто-проводки из операций (детерминированно) ──
-  const auto: JournalEntry[] = []
-  let seq = 0
-  const e = (date: string, debit: string, credit: string, amount: number, desc: string) => {
-    if (amount > 0.005) auto.push({ id: 'a' + (++seq), date, debit, credit, amount: +amount.toFixed(2), desc, source: 'auto' })
-  }
-  // продажи (закрытые чеки): деньги → выручка, выделение ҚҚС, себестоимость
-  for (const o of pos.closedOrders) {
-    const vat = vatAmount(o.total, 16)
-    const cash = o.payments.filter((p) => p.paymentTypeId === 'p-cash').reduce((s, p) => s + p.amount, 0)
-    const bank = +(o.total - cash).toFixed(2)
-    e(o.paidAt, '1010', '6010', cash, `Продажа нал. чек №${o.id}`)
-    e(o.paidAt, '1030', '6010', bank, `Продажа безнал/прочее чек №${o.id}`)
-    e(o.paidAt, '6010', '3130', vat, `ҚҚС 16% с продажи №${o.id}`)
-    const cost = o.lines.reduce((s, l) => s + dishCost(l.dishId, pos.ingredients) * l.qty, 0)
-    e(o.paidAt, '7010', '1330', cost, `Себестоимость продажи №${o.id}`)
-  }
-  // закупки (приходные накладные): товар + входящий ҚҚС / поставщику
-  for (const inv of pos.invoices.filter((i) => i.kind !== 'out')) {
-    e(inv.date, '1330', '3310', +(inv.total - inv.vat).toFixed(2), `Приход товара ${inv.no}`)
-    e(inv.date, '1420', '3310', inv.vat, `Входящий ҚҚС ${inv.no}`)
-  }
-  // касса: зарплата (начисление+выплата), инкассация/изъятие, внесения
-  for (const m of pos.cashMovements) {
-    if (/зарплат|аванс/i.test(m.type)) {
-      e(m.at, '7210', '3350', m.amount, `Начисление ЗП · ${m.comment}`)
-      e(m.at, '3350', '1010', m.amount, `Выплата ЗП · ${m.comment}`)
-    } else if (m.kind === 'out') {
-      e(m.at, '1030', '1010', m.amount, `${m.type} (касса → банк)`)
-    } else {
-      e(m.at, '1010', '1030', m.amount, `${m.type} (банк → касса)`)
-    }
-  }
+  // ── авто-проводки из операций (детерминированно) — единые правила в lib/ledger ──
+  const auto = buildAutoPostings({ closedOrders: pos.closedOrders, invoices: pos.invoices, cashMovements: pos.cashMovements, ingredients: pos.ingredients })
 
   const journal = [...pos.manualPostings, ...auto]
   const totalDr = +journal.reduce((s, j) => s + j.amount, 0).toFixed(2)

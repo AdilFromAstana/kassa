@@ -19,6 +19,8 @@ import { downloadExcel, xlsNum } from '../lib/export'
 import { buildStockMoves, turnoverByIngredient, reconstructOpening, ingredientLedger } from '../lib/stockMoves'
 import PivotTable from '../components/PivotTable'
 import type { PivotMeasure } from '../lib/pivot'
+import { buildAutoPostings } from '../lib/ledger'
+import { chartOfAccountsSeed } from '../mock/data'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
 import InputModal from '../components/InputModal'
@@ -112,7 +114,7 @@ export default function OfficeScreen() {
     shiftTypes, addShiftType, removeShiftType, medChecks, setMedCheck, payProfiles, setPayProfile,
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
-    motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction } = usePos()
+    motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction, manualPostings } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   // профиль оплаты сотрудника берётся из стора (офис правит → касса видит то же)
@@ -414,6 +416,17 @@ export default function OfficeScreen() {
     { id: 'out', label: 'Расход (кол-во)', value: (fs) => +fs.reduce((s, f) => s + Number(f.outQty), 0).toFixed(3) },
     { id: 'sumIn', label: 'Сумма прихода', money: true, value: (fs) => +fs.reduce((s, f) => s + Number(f.inQty) * Number(f.costPerUnit), 0).toFixed(2) },
     { id: 'sumOut', label: 'Сумма расхода', money: true, value: (fs) => +fs.reduce((s, f) => s + Number(f.outQty) * Number(f.costPerUnit), 0).toFixed(2) },
+  ]
+
+  // OLAP по проводкам: факты = проводки бухгалтерии (ручные + авто из lib/ledger), грейн = проводка.
+  const acctLabel = (code: string) => { const a = chartOfAccountsSeed.find((x) => x.code === code); return a ? `${a.code} ${a.name}` : code }
+  const postingFacts: PFact[] = [...manualPostings, ...buildAutoPostings({ closedOrders, invoices, cashMovements, ingredients })].map((j) => ({
+    debitAcc: acctLabel(j.debit), creditAcc: acctLabel(j.credit), day: j.date.split(',')[0] ?? j.date, source: j.source === 'manual' ? 'Ручная' : 'Авто', amount: j.amount,
+  }))
+  const POSTING_DIMS = [{ key: 'debitAcc', label: 'Счёт Дт' }, { key: 'creditAcc', label: 'Счёт Кт' }, { key: 'day', label: 'Дата' }, { key: 'source', label: 'Источник' }]
+  const POSTING_MEASURES: PivotMeasure<PFact>[] = [
+    { id: 'amount', label: 'Сумма', money: true, value: (fs) => +fs.reduce((s, f) => s + Number(f.amount), 0).toFixed(2) },
+    { id: 'cnt', label: 'Проводок', value: (fs) => fs.length },
   ]
 
   // остатки на складах + критерий
@@ -1171,7 +1184,7 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP по продажам' }, { id: 'custom', label: 'Настраиваемый' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP по продажам' }, { id: 'custom', label: 'Настраиваемый' }, { id: 'postings', label: 'OLAP по проводкам' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
                 {!['olap', 'pnl', 'custom', 'postings'].includes(report) && (
@@ -1629,6 +1642,16 @@ export default function OfficeScreen() {
                 <PivotTable facts={customFacts} dims={CUSTOM_DIMS} measures={CUSTOM_MEASURES}
                   initialRows={['ingredient']} initialCols={['opType']} excelName="iiko-настраиваемый-отчёт"
                   note="Фильтры по значениям и сохранённые виды — бэклог. Тип операции: Приходная накладная / Акт списания / Реализация / Инвентаризация и т.д." />
+              </div>
+            )}
+
+            {/* 3c. OLAP по проводкам — второй вид OLAP (движения по счетам) */}
+            {report === 'postings' && (
+              <div>
+                <div className="text-xs text-gray-500 mb-3">Сводная по бухгалтерским проводкам (ручные + авто из продаж/закупок/ЗП/кассы). Грейн — проводка. Измерения: счёт Дт/Кт, дата, источник.</div>
+                <PivotTable facts={postingFacts} dims={POSTING_DIMS} measures={POSTING_MEASURES}
+                  initialRows={['debitAcc']} initialCols={['source']} excelName="iiko-OLAP-проводки"
+                  note="Σ дебетовых = Σ кредитовых по построению (см. тест lib/ledger). Полный план счетов и ОСВ — во вкладке «Бухучёт» раздела Финансы." />
               </div>
             )}
 
