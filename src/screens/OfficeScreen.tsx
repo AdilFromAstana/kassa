@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor, Trash2, Plus } from 'lucide-react'
-import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
+import { usePos, lineTotal, lineUnitPrice, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
 import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance, warehouses } from '../mock/data'
@@ -167,7 +167,7 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [purchMode, setPurchMode] = useState<'bySupplier' | 'byStore'>('bySupplier') // Отчёт о закупках (topic-607): по поставщикам / по складам
   const [whereIng, setWhereIng] = useState(ingredients[0]?.id ?? '') // Вхождение товара в блюдо (topic-210): выбранный ингредиент
@@ -233,6 +233,10 @@ export default function OfficeScreen() {
     } else if (report === 'whereused') {
       downloadExcel('iiko-вхождение-товара', [[`Товар: ${whereIngObj?.name ?? ''}`], ['Блюдо', 'Брутто', 'Нетто', 'Выход'],
         ...whereUsedRows.map((x) => [x.d.name, xlsNum(x.gross, 3), xlsNum(x.netto, 3), xlsNum(x.out, 3)])])
+    } else if (report === 'dishdetail') {
+      downloadExcel('iiko-отчёт-по-блюдам', [['Официант', 'Блюдо', 'Код', '№ заказа', 'Стол', 'Цена', 'Кол-во', 'Полн. сумма', 'Скидка', 'Итог. сумма', 'Тип оплаты', 'Сумма ҚҚС'],
+        ...dishDetailRows.map((r) => [r.waiter, r.name, r.code, r.orderId, r.table, xlsNum(r.price), xlsNum(r.qty, 2), xlsNum(r.full), xlsNum(r.disc), xlsNum(r.itog), r.payName, xlsNum(r.vat)]),
+        ['Итого', '', '', '', '', '', xlsNum(dishDetailTot.qty, 2), xlsNum(dishDetailTot.full), xlsNum(dishDetailTot.disc), xlsNum(dishDetailTot.itog), '', xlsNum(dishDetailTot.vat)]])
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -306,6 +310,20 @@ export default function OfficeScreen() {
     return it ? { d, gross: it.gross, netto: itemNetto(it), out: itemYield(it) } : null
   }).filter((x): x is { d: typeof dishes[number]; gross: number; netto: number; out: number } => x != null)
     .sort((a, b) => b.gross - a.gross)
+
+  // Отчёт по блюдам (topic-107): детализация проданных порций, по умолчанию группировка по официанту.
+  // Колонки 1:1 (что есть в моке): Официант · Блюдо · Код · № заказа · Стол · Цена · Кол-во · Полн. сумма · Скидка · Итог. сумма · Тип оплаты · Сумма ҚҚС.
+  const dishDetailRows = closedOrders.flatMap((o) => {
+    const payName = o.payments.map((p) => p.name).join(', ')
+    const table = o.tabName ? `Tab: ${o.tabName}` : o.tableId ? o.tableId.replace(/^t-/, '') : '—'
+    return o.lines.map((l) => {
+      const unit = lineUnitPrice(l)
+      const full = +(unit * l.qty).toFixed(2)
+      const itog = +lineTotal(l).toFixed(2)
+      return { waiter: o.waiter || '—', name: l.name, code: findDish(l.dishId)?.code ?? '', orderId: o.id, table, price: unit, qty: l.qty, full, disc: +(full - itog).toFixed(2), itog, payName, vat: +(itog - itog / (1 + l.vat / 100)).toFixed(2) }
+    })
+  }).sort((a, b) => a.waiter.localeCompare(b.waiter) || a.name.localeCompare(b.name))
+  const dishDetailTot = dishDetailRows.reduce((t, r) => ({ qty: t.qty + r.qty, full: t.full + r.full, disc: t.disc + r.disc, itog: t.itog + r.itog, vat: t.vat + r.vat }), { qty: 0, full: 0, disc: 0, itog: 0, vat: 0 })
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1062,13 +1080,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'whereused' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'dishdetail' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1237,6 +1255,50 @@ export default function OfficeScreen() {
                   )}
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Источник — приходные накладные (входящие ЭСФ) из «Бухгалтерия». Доля % — от общего объёма закупок за период. Отклонение цены от прайс-листа поставщика — бэклог (прайс-листов нет).</div>
+              </div>
+            )}
+
+            {/* 1f. Отчёт по блюдам (topic-107) — детализация продаж, группировка по официанту */}
+            {report === 'dishdetail' && (
+              <div>
+                <div className="text-xs text-gray-500 mb-3">Детализация проданных порций за период, по официантам. Колонки 1:1 с iiko (доступные в моке). Времена подачи/печати, авторизация, проблемные операции — бэклог.</div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto" style={{ maxHeight: '65vh' }}>
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-white"><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Официант</th><th>Блюдо</th><th>Код</th><th className="text-right">№ зак.</th><th>Стол</th><th className="text-right">Цена</th><th className="text-right">Кол-во</th><th className="text-right">Полн. сумма</th><th className="text-right">Скидка</th><th className="text-right">Итог. сумма</th><th>Тип оплаты</th><th className="text-right p-2">Сумма ҚҚС</th>
+                    </tr></thead>
+                    <tbody>
+                      {dishDetailRows.length === 0 ? <tr><td colSpan={12} className="p-3 text-gray-400">Нет продаж.</td></tr> : dishDetailRows.map((r, i) => (
+                        <tr key={i} className="border-b border-gray-50 last:border-0">
+                          <td className="p-2 text-gray-600">{r.waiter}</td>
+                          <td>{r.name}</td>
+                          <td className="font-mono text-xs text-gray-400">{r.code}</td>
+                          <td className="text-right text-gray-500">{r.orderId}</td>
+                          <td className="text-gray-500">{r.table}</td>
+                          <td className="text-right">{formatTenge(r.price)}</td>
+                          <td className="text-right">{+r.qty.toFixed(2)}</td>
+                          <td className="text-right">{formatTenge(r.full)}</td>
+                          <td className="text-right text-gray-500">{r.disc ? formatTenge(r.disc) : '—'}</td>
+                          <td className="text-right font-medium">{formatTenge(r.itog)}</td>
+                          <td className="text-gray-500 text-xs">{r.payName}</td>
+                          <td className="text-right p-2 text-gray-500">{formatTenge(r.vat)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {dishDetailRows.length > 0 && (
+                      <tfoot className="sticky bottom-0 bg-white"><tr className="border-t border-gray-200 font-semibold">
+                        <td className="p-2" colSpan={6}>Итого ({dishDetailRows.length} позиц.)</td>
+                        <td className="text-right">{+dishDetailTot.qty.toFixed(2)}</td>
+                        <td className="text-right">{formatTenge(dishDetailTot.full)}</td>
+                        <td className="text-right">{formatTenge(dishDetailTot.disc)}</td>
+                        <td className="text-right">{formatTenge(dishDetailTot.itog)}</td>
+                        <td></td>
+                        <td className="text-right p-2">{formatTenge(dishDetailTot.vat)}</td>
+                      </tr></tfoot>
+                    )}
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Полн. сумма = Цена × Кол-во · Итог. сумма = с учётом скидки · Сумма ҚҚС — выделена из итоговой по ставке позиции.</div>
               </div>
             )}
 
