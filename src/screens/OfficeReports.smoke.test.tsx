@@ -74,6 +74,8 @@ describe('Бэк-офис → Финансы → Приём платежей / �
     expect(screen.getByText('Долг поставщикам')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Платёжный календарь' }))
     expect(screen.getByText('Всего к оплате')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'План-факт' }))
+    expect(screen.getByText('План выручки, ₸')).toBeTruthy()
   })
 })
 

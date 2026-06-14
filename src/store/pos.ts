@@ -164,6 +164,12 @@ function loadQuickMenu(): Record<string, number> {
   return {}
 }
 function persistQuickMenu(m: Record<string, number>) { void repo.saveConfig('iiko-quick-menu', m) }
+// План-факт на месяц (07): план по выручке и числу чеков (вводит пользователь).
+function loadMonthPlan(): { revenue: number; checks: number } {
+  try { const raw = localStorage.getItem('iiko-plan-fact'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return { revenue: 0, checks: 0 }
+}
+function persistMonthPlan(p: { revenue: number; checks: number }) { void repo.saveConfig('iiko-plan-fact', p) }
 function loadMedChecks(): Record<string, string> {
   try { const raw = localStorage.getItem('iiko-med-checks'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
@@ -368,6 +374,7 @@ interface PosState {
   shiftTypes: { id: string; name: string; from: string; to: string }[] // типы смен (расписание, Сотрудники)
   shiftSchedule: Record<string, Record<string, string>> // расписание: staffId → дата(ISO) → id типа смены
   quickMenuPages: Record<string, number> // быстрое меню: оверрайд страницы группы на кассе (groupId → page)
+  monthPlan: { revenue: number; checks: number } // план-факт на месяц: план по выручке/чекам (ввод пользователя)
   medChecks: Record<string, string> // медкнижки: staffId → срок действия (ISO дата)
   payProfiles: Record<string, { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }> // профиль оплаты сотрудника (офис → касса)
   loyaltyProgram: LoyaltyProgram // бонусная программа iikoCard: мастер-переключатель (офис → касса)
@@ -548,6 +555,7 @@ interface PosState {
   removeShiftType: (id: string) => void
   setShiftAssignment: (staffId: string, date: string, shiftTypeId: string | undefined) => void
   setGroupPage: (groupId: string, page: number) => void // быстрое меню: переназначить страницу группы
+  setMonthPlan: (patch: Partial<{ revenue: number; checks: number }>) => void // план-факт: ввод плана месяца
   setMedCheck: (staffId: string, expiry: string) => void
   setPayProfile: (staffId: string, patch: { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }) => void
   addCashOpType: (c: Omit<CashOpType, 'id'>) => void
@@ -628,6 +636,7 @@ export const usePos = create<PosState>((set, get) => ({
   shiftTypes: loadShiftTypes(),
   shiftSchedule: loadShiftSchedule(),
   quickMenuPages: loadQuickMenu(),
+  monthPlan: loadMonthPlan(),
   medChecks: loadMedChecks(),
   payProfiles: loadPayProfiles(),
   loyaltyProgram: loadLoyaltyProgram(),
@@ -1506,6 +1515,11 @@ export const usePos = create<PosState>((set, get) => ({
     const next = { ...st.quickMenuPages, [groupId]: page }
     persistQuickMenu(next)
     return { quickMenuPages: next }
+  }),
+  setMonthPlan: (patch) => set((st) => {
+    const next = { ...st.monthPlan, ...patch }
+    persistMonthPlan(next)
+    return { monthPlan: next }
   }),
   setMedCheck: (staffId, expiry) => set((st) => {
     const m = { ...st.medChecks, [staffId]: expiry }

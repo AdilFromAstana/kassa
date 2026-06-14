@@ -24,6 +24,7 @@ import PivotTable from '../components/PivotTable'
 import type { PivotMeasure } from '../lib/pivot'
 import { buildAutoPostings } from '../lib/ledger'
 import { payables, payablesSummary } from '../lib/payables'
+import { planFact } from '../lib/planfact'
 import { dateSortKey } from '../lib/stockMoves'
 import { chartOfAccountsSeed } from '../mock/data'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
@@ -128,7 +129,7 @@ export default function OfficeScreen() {
     cashOpTypes, addCashOpType, removeCashOpType, writeoffReasons, addWriteoffReason, removeWriteoffReason,
     discounts, addDiscount, updateDiscount, removeDiscount, clubCards, addClubCard, removeClubCard,
     motivationPrograms, addMotivation, updateMotivation, removeMotivation, salaryDeductions, addDeduction, removeDeduction, manualPostings,
-    quickMenuPages, setGroupPage } = usePos()
+    quickMenuPages, setGroupPage, monthPlan, setMonthPlan } = usePos()
   const [section, setSection] = useState<Section>('settings')
   const [role, setRole] = useState<string>('Администратор')
   // профиль оплаты сотрудника берётся из стора (офис правит → касса видит то же)
@@ -176,7 +177,7 @@ export default function OfficeScreen() {
   const [newOt, setNewOt] = useState({ name: '', mode: 'dinein' as OrderType, vat: 16 as VatRate })
   const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
   const [newCat, setNewCat] = useState('')
-  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'payables' | 'calendar' | 'ledger'>('book')
+  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'payables' | 'calendar' | 'planfact' | 'ledger'>('book')
   const [rightSearch, setRightSearch] = useState('')
   const [rightScope, setRightScope] = useState<'all' | 'front' | 'office' | 'delivery'>('all')
   const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
@@ -2081,7 +2082,7 @@ export default function OfficeScreen() {
               Источник — наличные продажи, внесения/изъятия (вкл. инкассацию и выплаты ЗП), возвраты наличными, разменный фонд смены.
             </div>
             <Tabs active={financeTab} onChange={setFinanceTab} items={[
-              { id: 'book', label: 'Кассовая книга' }, { id: 'cashflow', label: 'ДДС (приток/отток)' }, { id: 'payables', label: 'Приём платежей' }, { id: 'calendar', label: 'Платёжный календарь' }, { id: 'ledger', label: 'Бухучёт (план/проводки/ОСВ/баланс)' },
+              { id: 'book', label: 'Кассовая книга' }, { id: 'cashflow', label: 'ДДС (приток/отток)' }, { id: 'payables', label: 'Приём платежей' }, { id: 'calendar', label: 'Платёжный календарь' }, { id: 'planfact', label: 'План-факт' }, { id: 'ledger', label: 'Бухучёт (план/проводки/ОСВ/баланс)' },
             ]} />
             {financeTab === 'payables' ? (() => {
               const payList = payables(invoices, invoicePaid, dateSortKey(todayISO()))
@@ -2154,6 +2155,39 @@ export default function OfficeScreen() {
                     </table>
                   </div>
                   <div className="text-xs text-gray-400 mt-2">Поступления (план выручки) и остатки на счетах для авто-детекции разрыва — из плана/банка (на бэкенде). Здесь — фактический график оттоков по накладным.</div>
+                </div>
+              )
+            })() : financeTab === 'planfact' ? (() => {
+              const fact = { revenue: +closedOrders.reduce((s, o) => s + o.total, 0).toFixed(2), checks: closedOrders.length }
+              const rows = planFact(monthPlan, fact)
+              const fmt = (v: number, money: boolean) => (money ? formatTenge(v) : String(v))
+              return (
+                <div className="max-w-2xl">
+                  <div className="text-xs text-gray-500 mb-3">План-факт на месяц. План вводите вручную; факт — из закрытых чеков (период = текущая смена, мок). Средний чек = Выручка / Число чеков.</div>
+                  <div className="flex flex-wrap items-end gap-3 mb-4 bg-white border border-gray-200 rounded-md p-3">
+                    <label className="flex flex-col text-xs text-gray-500">План выручки, ₸
+                      <input type="number" min={0} value={monthPlan.revenue} onChange={(e) => setMonthPlan({ revenue: Math.max(0, parseFloat(e.target.value) || 0) })} className="mt-1 h-9 w-40 rounded border border-gray-300 px-2 text-right" /></label>
+                    <label className="flex flex-col text-xs text-gray-500">План чеков
+                      <input type="number" min={0} value={monthPlan.checks} onChange={(e) => setMonthPlan({ checks: Math.max(0, parseInt(e.target.value, 10) || 0) })} className="mt-1 h-9 w-28 rounded border border-gray-300 px-2 text-right" /></label>
+                    <div className="text-xs text-gray-400 ml-auto">Плановый средний чек: {monthPlan.checks ? formatTenge(monthPlan.revenue / monthPlan.checks) : '—'}</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Показатель</th><th className="text-right">План</th><th className="text-right">Факт</th><th className="text-right">Отклонение</th><th className="text-right p-2">Выполнение</th></tr></thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.metric} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{r.metric}</td>
+                            <td className="text-right text-gray-500">{r.plan ? fmt(r.plan, r.money) : '—'}</td>
+                            <td className="text-right font-medium">{fmt(r.fact, r.money)}</td>
+                            <td className={`text-right ${r.deviation < 0 ? 'text-rose-600' : r.deviation > 0 ? 'text-emerald-700' : 'text-gray-400'}`}>{r.deviation > 0 ? '+' : ''}{fmt(r.deviation, r.money)}</td>
+                            <td className="text-right p-2">{r.plan ? <span className={`text-xs px-2 py-0.5 rounded-full ${r.pct >= 100 ? 'bg-emerald-100 text-emerald-700' : r.pct >= 80 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{r.pct}%</span> : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">Помесячный план по дням (весовые коэффициенты) и автопланирование ±% от факта прошлого периода (topic-405) — расширение поверх этой базы.</div>
                 </div>
               )
             })() : financeTab === 'ledger' ? <OfficeLedger /> : (() => {
