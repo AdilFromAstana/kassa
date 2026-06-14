@@ -167,8 +167,9 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
+  const [purchMode, setPurchMode] = useState<'bySupplier' | 'byStore'>('bySupplier') // Отчёт о закупках (topic-607): по поставщикам / по складам
   const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
   const [unsoldMax, setUnsoldMax] = useState('5') // порог «плохо раскупается» (topic-621): количество ≤ N
   const addPLine = () => {
@@ -218,6 +219,16 @@ export default function OfficeScreen() {
     } else if (report === 'unsold') {
       downloadExcel('iiko-непродаваемые-блюда', [['Название', 'Группа', 'Продано'],
         ...unsoldRows.map((x) => [x.d.name, x.group, xlsNum(x.qty, 2)])])
+    } else if (report === 'purchases') {
+      if (purchMode === 'bySupplier') {
+        downloadExcel('iiko-закупки-по-поставщикам', [['Поставщик', 'Накладных', 'Сумма', 'в т.ч. ҚҚС', 'Доля %'],
+          ...purchBySupplier.map((s) => [s.name, s.count, xlsNum(s.sum), xlsNum(s.vat), share(s.sum)]),
+          ['Итого', purchBySupplier.reduce((a, s) => a + s.count, 0), xlsNum(purchTotal), xlsNum(purchBySupplier.reduce((a, s) => a + s.vat, 0)), 100]])
+      } else {
+        downloadExcel('iiko-закупки-по-складам', [['Склад', 'Накладных', 'Сумма', 'Доля %'],
+          ...purchByStore.map((s) => [s.store, s.count, xlsNum(s.sum), share(s.sum)]),
+          ['Итого', purchByStore.reduce((a, s) => a + s.count, 0), xlsNum(purchTotal), 100]])
+      }
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -272,6 +283,16 @@ export default function OfficeScreen() {
     .map((d) => ({ d, qty: +(soldQtyByDish[d.id] ?? 0).toFixed(2), group: menuGroups.find((g) => g.id === d.groupId)?.name ?? '—' }))
     .filter((x) => x.qty <= unsoldThreshold)
     .sort((a, b) => a.qty - b.qty || a.d.name.localeCompare(b.d.name))
+
+  // Отчёт о закупках (topic-607): по приходным накладным (входящие ЭСФ). Виды — по поставщикам / по складам, с долей %.
+  const purchTotal = +incoming.reduce((s, i) => s + i.total, 0).toFixed(2)
+  const purchBySupplier = Object.values(incoming.reduce((acc, i) => {
+    const a = (acc[i.supplierName] ??= { name: i.supplierName, count: 0, sum: 0, vat: 0 }); a.count++; a.sum += i.total; a.vat += i.vat; return acc
+  }, {} as Record<string, { name: string; count: number; sum: number; vat: number }>)).sort((a, b) => b.sum - a.sum)
+  const purchByStore = Object.values(incoming.reduce((acc, i) => {
+    const k = i.store ?? '—'; const a = (acc[k] ??= { store: k, count: 0, sum: 0 }); a.count++; a.sum += i.total; return acc
+  }, {} as Record<string, { store: string; count: number; sum: number }>)).sort((a, b) => b.sum - a.sum)
+  const share = (s: number) => (purchTotal ? Math.round(s / purchTotal * 100) : 0)
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1028,13 +1049,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1152,6 +1173,57 @@ export default function OfficeScreen() {
                   </table>
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Блюда «в продаже на период» с количеством продаж ≤ порога. Красным — не продавались ни разу. Детализация по официантам/ТП — бэклог.</div>
+              </div>
+            )}
+
+            {/* 1d. Отчёт о закупках (topic-607) */}
+            {report === 'purchases' && (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  {([['bySupplier', 'По поставщикам'], ['byStore', 'По складам']] as const).map(([m, l]) => (
+                    <button key={m} onClick={() => setPurchMode(m)} className={`h-8 px-3 rounded text-sm ${purchMode === m ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{l}</button>
+                  ))}
+                  <span className="ml-auto text-sm text-gray-500">Всего закупок: <b className="text-gray-800">{formatTenge(purchTotal)}</b></span>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  {purchMode === 'bySupplier' ? (
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">Поставщик</th><th className="text-right">Накладных</th><th className="text-right">Сумма</th><th className="text-right">в т.ч. ҚҚС</th><th className="text-right p-2">Доля %</th>
+                      </tr></thead>
+                      <tbody>
+                        {purchBySupplier.length === 0 ? <tr><td colSpan={5} className="p-3 text-gray-400">Нет приходных накладных.</td></tr> : purchBySupplier.map((s) => (
+                          <tr key={s.name} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{s.name}</td>
+                            <td className="text-right">{s.count}</td>
+                            <td className="text-right">{formatTenge(s.sum)}</td>
+                            <td className="text-right text-gray-500">{formatTenge(s.vat)}</td>
+                            <td className="text-right p-2 text-gray-600">{share(s.sum)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {purchBySupplier.length > 0 && <tfoot><tr className="border-t border-gray-200 font-semibold"><td className="p-2">Итого</td><td className="text-right">{purchBySupplier.reduce((a, s) => a + s.count, 0)}</td><td className="text-right">{formatTenge(purchTotal)}</td><td className="text-right">{formatTenge(purchBySupplier.reduce((a, s) => a + s.vat, 0))}</td><td className="text-right p-2">100%</td></tr></tfoot>}
+                    </table>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">Склад-получатель</th><th className="text-right">Накладных</th><th className="text-right">Сумма</th><th className="text-right p-2">Доля %</th>
+                      </tr></thead>
+                      <tbody>
+                        {purchByStore.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Нет приходных накладных.</td></tr> : purchByStore.map((s) => (
+                          <tr key={s.store} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{s.store}</td>
+                            <td className="text-right">{s.count}</td>
+                            <td className="text-right">{formatTenge(s.sum)}</td>
+                            <td className="text-right p-2 text-gray-600">{share(s.sum)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {purchByStore.length > 0 && <tfoot><tr className="border-t border-gray-200 font-semibold"><td className="p-2">Итого</td><td className="text-right">{purchByStore.reduce((a, s) => a + s.count, 0)}</td><td className="text-right">{formatTenge(purchTotal)}</td><td className="text-right p-2">100%</td></tr></tfoot>}
+                    </table>
+                  )}
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Источник — приходные накладные (входящие ЭСФ) из «Бухгалтерия». Доля % — от общего объёма закупок за период. Отклонение цены от прайс-листа поставщика — бэклог (прайс-листов нет).</div>
               </div>
             )}
 
