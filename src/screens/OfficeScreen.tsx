@@ -6,6 +6,7 @@ import { printToast } from '../lib/print'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance } from '../mock/data'
 import OfficeDelivery from './OfficeDelivery'
+import OfficeCorp from './OfficeCorp'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
@@ -29,8 +30,9 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'admin'
+type Section = 'corp' | 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'admin'
 const NAV: { id: Section; label: string }[] = [
+  { id: 'corp', label: 'Корпорация' },
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
   { id: 'prikazy', label: 'Прейскурант (приказы)' },
@@ -48,6 +50,7 @@ const NAV: { id: Section; label: string }[] = [
   { id: 'admin', label: 'Администрирование' },
 ]
 const SECTION_TITLE: Record<Section, string> = {
+  corp: 'Корпорация — структура сети, настройки, нумерация, концепции, синхронизация',
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
   discount: 'Дисконтная система — скидки/надбавки и клубные карты',
@@ -80,8 +83,8 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'admin'],
-  'Управляющий': ['settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
+  'Администратор': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'admin'],
+  'Управляющий': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'accounting', 'payroll', 'finance', 'reports', 'journal'],
   'Бухгалтер': ['accounting', 'payroll', 'finance', 'reports', 'stock'],
 }
 
@@ -336,7 +339,9 @@ export default function OfficeScreen() {
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
-        {section === 'settings' ? (
+        {section === 'corp' ? (
+          <OfficeCorp />
+        ) : section === 'settings' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
               Профиль заведения (как в реальном iikoOffice). Касса (Front) только читает его и применяет.

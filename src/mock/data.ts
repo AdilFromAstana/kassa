@@ -1,4 +1,4 @@
-import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings } from '../types'
+import type { Hall, Table, PaymentType, Staff, Banquet, Message, Contractor, Discount, ClubCard, MotivationProgram, OrderTypeDef, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice, DeliveryCustomer, Courier, DeliveryOrder, DeliverySettings, CorpSettings, Concept, DocNumber, SyncPoint } from '../types'
 import { todayISO, addDaysISO } from '../lib/date'
 
 // Склады заведения (для документов: списание/перемещение/инвентаризация).
@@ -79,6 +79,43 @@ export const clubCardSeed: ClubCard[] = [
 ]
 
 // iikoCard — бонусная программа лояльности (модуль 15) + карты гостей с балансом бонусов.
+// ───────── Корпорация (модуль 02) ─────────
+export const corpSettingsSeed: CorpSettings = { name: 'Сеть «Mumtaz»', bin: '123456789012', currency: 'тенге', symbol: '₸', precision: 2, roundToWhole: false }
+export const conceptsSeed: Concept[] = [
+  { id: 'cn-rest', code: 'REST', name: 'Ресторан', group: 'Основное меню' },
+  { id: 'cn-dlv', code: 'DLV', name: 'Доставка', group: 'Доставка' },
+  { id: 'cn-bar', code: 'BAR', name: 'Бар', group: 'Барная карта' },
+]
+export const docNumberingSeed: DocNumber[] = [
+  { id: 'dn-prih', docType: 'Приходная накладная', template: '{D}/ПН-#', counter: 142 },
+  { id: 'dn-rash', docType: 'Расходная накладная', template: '{D}/РН-#', counter: 58 },
+  { id: 'dn-spis', docType: 'Акт списания', template: '{D}/СП-#', counter: 73 },
+  { id: 'dn-inv', docType: 'Инвентаризация', template: '{D}/ИНВ-{yyyy}-#', counter: 12 },
+  { id: 'dn-prig', docType: 'Акт приготовления', template: '{D}/ПРГ-#', counter: 31 },
+]
+// «структура сети» (дерево корпорации) — статичная для мока
+export const corpTreeSeed = {
+  name: 'Сеть «Mumtaz»',
+  legal: [{
+    name: 'ТОО «Мумтаз»', bin: '123456789012',
+    divisions: [{
+      name: 'Подразделение Астана',
+      points: [
+        { name: 'ТП Астана (центр)', warehouses: ['Основной склад', 'Бар', 'Кухонный цех'] },
+        { name: 'ТП Астана (Левый берег)', warehouses: ['Основной склад'] },
+      ],
+    }, {
+      name: 'Производство (цех)',
+      points: [{ name: 'Центральный цех', warehouses: ['Склад заготовок'] }],
+    }],
+  }],
+}
+export const syncMonitorSeed: SyncPoint[] = [
+  { id: 'sp-1', point: 'ТП Астана (центр)', lastImport: 'Сегодня 18:30', lastExport: 'Сегодня 18:31', status: 'ok' },
+  { id: 'sp-2', point: 'ТП Астана (Левый берег)', lastImport: 'Сегодня 17:55', lastExport: 'Сегодня 18:25', status: 'requested' },
+  { id: 'sp-3', point: 'Центральный цех', lastImport: 'Вчера 22:10', lastExport: 'Вчера 22:10', status: 'skipped' },
+]
+
 // ───────── Доставка (модуль 14, iikoDelivery) ─────────
 export const deliverySettingsSeed: DeliverySettings = {
   durationMin: 60, minSum: 3000, feeAmount: 800,

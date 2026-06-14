@@ -328,6 +328,19 @@ export interface Invoice {
   kind?: 'in' | 'out' // входящая (приход от поставщика) / исходящая (покупателю)
 }
 
+// ───────── Корпорация (модуль 02) ─────────
+export interface CorpSettings {
+  name: string
+  bin: string          // БИН корпорации (РК)
+  currency: string     // валюта учёта
+  symbol: string       // символ валюты
+  precision: number    // точность сумм в BackOffice (знаков после запятой)
+  roundToWhole: boolean // округлять стоимость заказа до целого в пользу гостя
+}
+export interface Concept { id: string; code: string; name: string; group: string } // концепция (бренд/тип обслуживания)
+export interface DocNumber { id: string; docType: string; template: string; counter: number } // шаблон нумерации документа
+export interface SyncPoint { id: string; point: string; lastImport: string; lastExport: string; status: 'ok' | 'requested' | 'skipped' | 'error' } // монитор синхронизации ТП
+
 // ───────── Доставка (модуль 14, iikoDelivery) ─────────
 export interface DeliveryCustomer {
   id: string

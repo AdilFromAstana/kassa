@@ -5,12 +5,14 @@ import type {
   Ingredient, WriteOff, PriceOrder, PriceOrderLine, SalaryPayout, PaymentType, CashOpType, Discount, ClubCard, OrderTypeDef,
   MotivationProgram, SalaryDeduction, LoyaltyCard, LoyaltyProgram, License, PrintTemplate, InputDevice,
   DeliveryCustomer, Courier, DeliveryOrder, DeliveryStatus, DeliverySettings, DeliveryItem,
+  CorpSettings, Concept, DocNumber, SyncPoint,
 } from '../types'
 import { findDish } from '../mock/menu'
 import { initialBanquets, messages as messagesSeed, contractors as contractorsSeed, staff as staffSeed,
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
   loyaltyProgramSeed, loyaltyCardsSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed,
-  deliverySettingsSeed, couriersSeed, deliveryCustomersSeed, deliveryOrdersSeed } from '../mock/data'
+  deliverySettingsSeed, couriersSeed, deliveryCustomersSeed, deliveryOrdersSeed,
+  corpSettingsSeed, conceptsSeed, docNumberingSeed, syncMonitorSeed } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 import { todayISO } from '../lib/date'
 
@@ -342,6 +344,10 @@ interface PosState {
   deliveryCustomers: DeliveryCustomer[] // клиенты доставки
   deliveryOrders: DeliveryOrder[]   // заказы доставки (жизненный цикл)
   deliverySeq: number
+  corpSettings: CorpSettings   // настройки корпорации (название/БИН/валюта/округление)
+  concepts: Concept[]          // концепции (бренд/тип обслуживания)
+  docNumbering: DocNumber[]    // шаблоны нумерации документов
+  syncMonitor: SyncPoint[]     // монитор синхронизации ЦО↔ТП
   paymentTypes: PaymentType[] // типы оплат (Розничные продажи) — касса строит вкладки из активных
   cashOpTypes: CashOpType[]   // типы внесений/изъятий наличных
   writeoffReasons: string[]   // причины списания (акт списания)
@@ -410,6 +416,12 @@ interface PosState {
   setDeliveryStatus: (id: number, status: DeliveryStatus) => void
   assignCourier: (id: number, courierId: string) => void
   cancelDelivery: (id: number, reason: string) => void
+  // корпорация (модуль 02)
+  setCorpSettings: (patch: Partial<CorpSettings>) => void
+  addConcept: (code: string, name: string, group: string) => void
+  removeConcept: (id: string) => void
+  setDocTemplate: (id: string, template: string) => void
+  requestSync: (id: string) => void
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
   pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
@@ -564,6 +576,10 @@ export const usePos = create<PosState>((set, get) => ({
   deliveryCustomers: loadAdmin('iiko-delivery-customers', deliveryCustomersSeed.map((c) => ({ ...c }))),
   deliveryOrders: loadAdmin('iiko-delivery-orders', deliveryOrdersSeed.map((o) => ({ ...o }))),
   deliverySeq: loadAdmin<DeliveryOrder[]>('iiko-delivery-orders', deliveryOrdersSeed).reduce((m, o) => Math.max(m, o.id), 1003),
+  corpSettings: loadAdmin('iiko-corp-settings', { ...corpSettingsSeed }),
+  concepts: loadAdmin('iiko-concepts', conceptsSeed.map((c) => ({ ...c }))),
+  docNumbering: loadAdmin('iiko-doc-numbering', docNumberingSeed.map((d) => ({ ...d }))),
+  syncMonitor: syncMonitorSeed.map((p) => ({ ...p })),
   paymentTypes: loadPaymentTypes(),
   cashOpTypes: loadCashOpTypes(),
   writeoffReasons: loadWriteoffReasons(),
@@ -862,6 +878,30 @@ export const usePos = create<PosState>((set, get) => ({
     persistAdmin('iiko-delivery-orders', list)
     return { deliveryOrders: list }
   }),
+  // ───────── Корпорация (модуль 02) ─────────
+  setCorpSettings: (patch) => set((st) => {
+    const s = { ...st.corpSettings, ...patch }
+    persistAdmin('iiko-corp-settings', s)
+    return { corpSettings: s }
+  }),
+  addConcept: (code, name, group) => set((st) => {
+    const list = [...st.concepts, { id: 'cn-' + (st.concepts.length + 1), code, name, group }]
+    persistAdmin('iiko-concepts', list)
+    return { concepts: list }
+  }),
+  removeConcept: (id) => set((st) => {
+    const list = st.concepts.filter((c) => c.id !== id)
+    persistAdmin('iiko-concepts', list)
+    return { concepts: list }
+  }),
+  setDocTemplate: (id, template) => set((st) => {
+    const list = st.docNumbering.map((d) => (d.id === id ? { ...d, template } : d))
+    persistAdmin('iiko-doc-numbering', list)
+    return { docNumbering: list }
+  }),
+  requestSync: (id) => set((st) => ({
+    syncMonitor: st.syncMonitor.map((p) => (p.id === id ? { ...p, status: 'ok' as const, lastExport: fullNow(), lastImport: fullNow() } : p)),
+  })),
   precheck: () => set((st) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'precheck' } : o)),
   })),
