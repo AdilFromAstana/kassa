@@ -167,9 +167,10 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'unsold' | 'purchases' | 'whereused' | 'stock' | 'vat' | 'olap' | 'pnl'>('sales')
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
   const [purchMode, setPurchMode] = useState<'bySupplier' | 'byStore'>('bySupplier') // Отчёт о закупках (topic-607): по поставщикам / по складам
+  const [whereIng, setWhereIng] = useState(ingredients[0]?.id ?? '') // Вхождение товара в блюдо (topic-210): выбранный ингредиент
   const [stockCrit, setStockCrit] = useState<'all' | 'belowMin' | 'zero' | 'neg'>('all')
   const [unsoldMax, setUnsoldMax] = useState('5') // порог «плохо раскупается» (topic-621): количество ≤ N
   const addPLine = () => {
@@ -229,6 +230,9 @@ export default function OfficeScreen() {
           ...purchByStore.map((s) => [s.store, s.count, xlsNum(s.sum), share(s.sum)]),
           ['Итого', purchByStore.reduce((a, s) => a + s.count, 0), xlsNum(purchTotal), 100]])
       }
+    } else if (report === 'whereused') {
+      downloadExcel('iiko-вхождение-товара', [[`Товар: ${whereIngObj?.name ?? ''}`], ['Блюдо', 'Брутто', 'Нетто', 'Выход'],
+        ...whereUsedRows.map((x) => [x.d.name, xlsNum(x.gross, 3), xlsNum(x.netto, 3), xlsNum(x.out, 3)])])
     } else if (report === 'stock') {
       downloadExcel('iiko-остатки', [['Артикул', 'Товар', 'Ед.', 'Остаток', 'Мин.', 'Себест/ед', 'Сумма'],
         ...stockRows.map((i) => [i.code, i.name, i.unit, xlsNum(i.stock, 3), i.min, xlsNum(i.costPerUnit), xlsNum(i.stock * i.costPerUnit)])])
@@ -293,6 +297,15 @@ export default function OfficeScreen() {
     const k = i.store ?? '—'; const a = (acc[k] ??= { store: k, count: 0, sum: 0 }); a.count++; a.sum += i.total; return acc
   }, {} as Record<string, { store: string; count: number; sum: number }>)).sort((a, b) => b.sum - a.sum)
   const share = (s: number) => (purchTotal ? Math.round(s / purchTotal * 100) : 0)
+
+  // Вхождение товара в блюдо (topic-210): где используется выбранный ингредиент (по техкартам блюд).
+  const whereIngObj = ingredients.find((i) => i.id === whereIng)
+  const whereUsedRows = dishes.map((d) => {
+    const card = techCardOverrides[d.id] ?? techCards[d.id] ?? []
+    const it = card.find((c) => c.ingredientId === whereIng)
+    return it ? { d, gross: it.gross, netto: itemNetto(it), out: itemYield(it) } : null
+  }).filter((x): x is { d: typeof dishes[number]; gross: number; netto: number; out: number } => x != null)
+    .sort((a, b) => b.gross - a.gross)
 
   // остатки на складах + критерий
   const stockRows = ingredients.filter((i) =>
@@ -1049,13 +1062,13 @@ export default function OfficeScreen() {
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP-отчёт' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'stock' || report === 'vat') && (
+                {(report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'whereused' || report === 'stock' || report === 'vat') && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${report === 'sales' || report === 'avg' || report === 'unsold' || report === 'purchases' || report === 'whereused' || report === 'stock' || report === 'vat' ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1224,6 +1237,37 @@ export default function OfficeScreen() {
                   )}
                 </div>
                 <div className="text-xs text-gray-400 mt-2">Источник — приходные накладные (входящие ЭСФ) из «Бухгалтерия». Доля % — от общего объёма закупок за период. Отклонение цены от прайс-листа поставщика — бэклог (прайс-листов нет).</div>
+              </div>
+            )}
+
+            {/* 1e. Вхождение товара в блюдо (topic-210) */}
+            {report === 'whereused' && (
+              <div>
+                <div className="flex items-center gap-2 mb-3 text-sm">
+                  <span className="text-gray-500">Товар:</span>
+                  <select value={whereIng} onChange={(e) => setWhereIng(e.target.value)} className="h-9 rounded border border-gray-300 px-2 min-w-[220px]">
+                    {ingredients.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+                  </select>
+                  <span className="ml-auto text-gray-500">Входит в блюд: <b className="text-gray-800">{whereUsedRows.length}</b></span>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                      <th className="p-2">Блюдо</th><th className="text-right">Брутто, {whereIngObj?.unit}</th><th className="text-right">Нетто</th><th className="text-right p-2">Выход</th>
+                    </tr></thead>
+                    <tbody>
+                      {whereUsedRows.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">«{whereIngObj?.name}» не входит ни в одну техкарту.</td></tr> : whereUsedRows.map((x) => (
+                        <tr key={x.d.id} className="border-b border-gray-100 last:border-0">
+                          <td className="p-2">{x.d.name}</td>
+                          <td className="text-right">{String(x.gross).replace('.', ',')}</td>
+                          <td className="text-right text-gray-500">{String(x.netto).replace('.', ',')}</td>
+                          <td className="text-right p-2 text-gray-500">{String(x.out).replace('.', ',')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">Где используется ингредиент (по техкартам блюд). Брутто — норма закладки на порцию; нетто/выход — с учётом потерь хол./гор. обработки.</div>
               </div>
             )}
 
