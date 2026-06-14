@@ -14,6 +14,7 @@ import OfficeJournal from './OfficeJournal'
 import OfficeAdmin from './OfficeAdmin'
 import OfficeContractors from './OfficeContractors'
 import OfficeExchange from './OfficeExchange'
+import OfficeHelp from './OfficeHelp'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge, vatBreakdown } from '../lib/money'
@@ -45,8 +46,9 @@ const FLAGS: { key: keyof Establishment; label: string; note: string }[] = [
   { key: 'fiscalBeforePay', label: 'Фискальный чек до оплаты', note: 'печать ФД перед приёмом денег (9.x)' },
 ]
 
-type Section = 'corp' | 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'contractors' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'exchange' | 'admin'
+type Section = 'favorites' | 'corp' | 'settings' | 'menu' | 'prikazy' | 'retail' | 'discount' | 'loyalty' | 'delivery' | 'staff' | 'stock' | 'reports' | 'contractors' | 'accounting' | 'payroll' | 'finance' | 'journal' | 'exchange' | 'admin' | 'help'
 const NAV: { id: Section; label: string }[] = [
+  { id: 'favorites', label: 'Избранное' },
   { id: 'corp', label: 'Корпорация' },
   { id: 'settings', label: 'Настройки заведения' },
   { id: 'menu', label: 'Меню и цены' },
@@ -65,8 +67,11 @@ const NAV: { id: Section; label: string }[] = [
   { id: 'journal', label: 'Журнал событий' },
   { id: 'exchange', label: 'Обмен данными' },
   { id: 'admin', label: 'Администрирование' },
+  { id: 'help', label: 'Помощь' },
 ]
 const SECTION_TITLE: Record<Section, string> = {
+  favorites: 'Избранное — быстрый доступ к разделам',
+  help: 'Помощь',
   corp: 'Корпорация — структура сети, настройки, нумерация, концепции, синхронизация',
   settings: 'Настройки торгового предприятия', menu: 'Меню и цены', prikazy: 'Прейскурант — приказы об изменении цен',
   retail: 'Розничные продажи — типы оплат, внесений/изъятий, причины списания, типы заказов',
@@ -101,9 +106,9 @@ function kzTax(okl: number) {
 // Роли офиса (как в iikoOffice) → доступные разделы. Гейтит сайдбар.
 const OFFICE_ROLES = ['Администратор', 'Управляющий', 'Бухгалтер']
 const ROLE_SECTIONS: Record<string, Section[]> = {
-  'Администратор': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange', 'admin'],
-  'Управляющий': ['corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange'],
-  'Бухгалтер': ['contractors', 'accounting', 'payroll', 'finance', 'reports', 'stock', 'exchange'],
+  'Администратор': ['favorites', 'corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'staff', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange', 'admin', 'help'],
+  'Управляющий': ['favorites', 'corp', 'settings', 'menu', 'prikazy', 'retail', 'discount', 'loyalty', 'delivery', 'stock', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'journal', 'exchange', 'help'],
+  'Бухгалтер': ['favorites', 'contractors', 'accounting', 'payroll', 'finance', 'reports', 'stock', 'exchange', 'help'],
 }
 
 export default function OfficeScreen() {
@@ -546,7 +551,21 @@ export default function OfficeScreen() {
           <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
         </div>
 
-        {section === 'corp' ? (
+        {section === 'favorites' ? (
+          <div className="p-6 max-w-4xl">
+            <div className="text-xs text-gray-500 mb-4">Быстрый доступ к разделам (Избранное, 01). Нажмите плитку, чтобы перейти.</div>
+            <div className="grid grid-cols-3 gap-3">
+              {visibleNav.filter((n) => n.id !== 'favorites' && n.id !== 'help').map((n) => (
+                <button key={n.id} onClick={() => setSection(n.id)}
+                  className="h-20 rounded-md bg-white border border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/40 text-left px-4 flex items-center text-gray-800 font-medium">
+                  {n.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : section === 'help' ? (
+          <OfficeHelp />
+        ) : section === 'corp' ? (
           <OfficeCorp />
         ) : section === 'settings' ? (
           <div className="p-6 max-w-3xl">

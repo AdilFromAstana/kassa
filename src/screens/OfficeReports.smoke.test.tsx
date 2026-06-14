@@ -65,3 +65,16 @@ describe('Бэк-офис → Обмен данными: смоук рендер
     expect(screen.getByText('Проводок к выгрузке')).toBeTruthy()
   })
 })
+
+describe('Бэк-офис → Избранное и Помощь: смоук рендера', () => {
+  it('Избранное открывается и показывает плитки быстрого доступа', () => {
+    render(<MemoryRouter><OfficeScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Избранное' }))
+    expect(screen.getByText(/Быстрый доступ к разделам/)).toBeTruthy()
+  })
+  it('Помощь открывается и показывает «О системе»', () => {
+    render(<MemoryRouter><OfficeScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Помощь' }))
+    expect(screen.getByText('О системе')).toBeTruthy()
+  })
+})
