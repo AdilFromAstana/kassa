@@ -12,7 +12,8 @@ const GRID = 'grid grid-cols-[90px_120px_140px_150px_70px_minmax(150px,1fr)_120p
 
 export default function BanquetsScreen() {
   const navigate = useNavigate()
-  const { banquets, setBanquetStatus, logout, orders, startOrder, openExistingOrder, setOrderPrepayment } = usePos()
+  const { banquets, setBanquetStatus, logout, orders, startOrder, openExistingOrder, setOrderPrepayment, can } = usePos()
+  const canEditRes = can('F_ERS')
   const [showBanket, setShowBanket] = useState(true)
   const [showReserv, setShowReserv] = useState(true)
   const [onlyActive, setOnlyActive] = useState(true)
@@ -105,7 +106,7 @@ export default function BanquetsScreen() {
               {r.status !== 'Снят' && (
                 <button onClick={(e) => { e.stopPropagation(); openOrder(r) }} className="text-xs bg-pos-blue text-white px-2 py-1 rounded" title="Открыть счёт на столе банкета">ЗАКАЗ</button>
               )}
-              {r.status === 'Действует' && (
+              {r.status === 'Действует' && canEditRes && (
                 <>
                   <button onClick={(e) => { e.stopPropagation(); setBanquetStatus(r.id, 'Гость пришёл') }} className="text-xs bg-pos-green px-2 py-1 rounded">Пришёл</button>
                   <button onClick={(e) => { e.stopPropagation(); setBanquetStatus(r.id, 'Снят') }} className="text-xs bg-pos-rose text-gray-900 px-2 py-1 rounded">Снять</button>

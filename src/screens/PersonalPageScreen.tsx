@@ -10,7 +10,7 @@ import TopBar from '../components/TopBar'
 // Личная страница (iikoFront): результат работы по датам + итоги месяца (ЛП/СПЧ) + мотивация + управление личной сменой.
 export default function PersonalPageScreen() {
   const navigate = useNavigate()
-  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms, salaryDeductions, payProfiles } = usePos()
+  const { user, personalShift, closedOrders, closePersonalShift, openPersonalShift, motivationPrograms, salaryDeductions, payProfiles, can } = usePos()
 
   // профиль оплаты сотрудника — те же значения, что выставил офис (из стора)
   const profile = (user && payProfiles[user.id]) || {}
@@ -130,7 +130,9 @@ export default function PersonalPageScreen() {
             )}
           </div>
 
-          {(() => {
+          {!can('F_VPSD') ? (
+            <div className="bg-white/5 rounded-lg p-4 max-w-md text-white/40 text-sm">Просмотр зарплаты недоступен (нужно право F_VPSD).</div>
+          ) : (() => {
             const base = payMode === 'hourly' ? Math.round(myHours * hourRate) : oklad
             const fines = salaryDeductions.filter((d) => d.staffId === user?.id).reduce((s, d) => s + d.amount, 0)
             const total = +(base + motivationTotal - fines).toFixed(0)

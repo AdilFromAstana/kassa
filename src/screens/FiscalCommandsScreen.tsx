@@ -11,7 +11,7 @@ import TopBar from '../components/TopBar'
 // X-отчёт — промежуточный, БЕЗ гашения (текущие итоги смены). Z-отчёт — сменный, С гашением (закрытие смены).
 export default function FiscalCommandsScreen() {
   const navigate = useNavigate()
-  const { cashShift, closedOrders, cashMovements, refunds } = usePos()
+  const { cashShift, closedOrders, cashMovements, refunds, can } = usePos()
   const [fr, setFr] = useState(fiscalRegistrators[0].id)
   const [report, setReport] = useState<null | 'x' | 'z'>(null)
   const reg = fiscalRegistrators.find((f) => f.id === fr)!
@@ -71,12 +71,12 @@ export default function FiscalCommandsScreen() {
       <div className="flex-1 overflow-auto p-6">
         {/* X / Z — отдельные кнопки сменных отчётов */}
         <div className="grid grid-cols-2 gap-3 max-w-3xl mb-3">
-          <button onClick={() => setReport('x')} disabled={!cashShift}
+          <button onClick={() => setReport('x')} disabled={!cashShift || !can('F_XR')} title={can('F_XR') ? '' : 'Нужно право F_XR'}
             className="h-24 rounded-md bg-emerald-600 text-white active:bg-emerald-700 disabled:opacity-40 flex flex-col items-center justify-center">
             <span className="text-lg font-semibold">X-отчёт</span>
             <span className="text-xs opacity-80">без гашения · текущие итоги</span>
           </button>
-          <button onClick={() => setReport('z')} disabled={!cashShift}
+          <button onClick={() => setReport('z')} disabled={!cashShift || !can('F_ZREP')} title={can('F_ZREP') ? '' : 'Нужно право F_ZREP'}
             className="h-24 rounded-md bg-rose-600 text-white active:bg-rose-700 disabled:opacity-40 flex flex-col items-center justify-center">
             <span className="text-lg font-semibold">Z-отчёт</span>
             <span className="text-xs opacity-80">с гашением · закрытие смены</span>

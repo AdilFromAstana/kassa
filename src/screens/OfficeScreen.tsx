@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
@@ -8,7 +8,7 @@ import { attendance } from '../mock/data'
 import OfficeDelivery from './OfficeDelivery'
 import OfficeCorp from './OfficeCorp'
 import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
-import { RIGHTS, POSITIONS } from '../lib/rights'
+import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge } from '../lib/money'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import CalendarModal from '../components/CalendarModal'
@@ -150,6 +150,8 @@ export default function OfficeScreen() {
   const [financeTab, setFinanceTab] = useState<'book' | 'cashflow'>('book')
   const [newLc, setNewLc] = useState({ number: '', owner: '', phone: '' })
   const [adminTab, setAdminTab] = useState<'license' | 'print' | 'devices' | 'db'>('license')
+  const [rightSearch, setRightSearch] = useState('')
+  const [rightScope, setRightScope] = useState<'all' | 'front' | 'office' | 'delivery'>('all')
   const [newTpl, setNewTpl] = useState({ name: '', type: 'Чек' })
   const [newDev, setNewDev] = useState({ name: '', type: 'Сканер штрихкода', group: 'pos' as 'keyboard' | 'pos' })
   const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
@@ -824,27 +826,56 @@ export default function OfficeScreen() {
               </div>
             )}
 
-            <div className="text-gray-500 text-xs uppercase mb-2">Права по должностям</div>
-            <div className="bg-white border border-gray-200 rounded-md overflow-auto">
-              <table className="w-full text-sm">
-                <thead>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <div className="text-gray-500 text-xs uppercase">Права по должностям ({Object.keys(RIGHTS).length} прав · {POSITIONS.length} ролей)</div>
+              <input value={rightSearch} onChange={(e) => setRightSearch(e.target.value)} placeholder="поиск права / кода" className="ml-auto h-8 w-56 rounded border border-gray-300 px-2 text-sm" />
+              <div className="flex gap-1 bg-gray-100 rounded p-0.5">
+                {([['all', 'Все'], ['front', 'Касса'], ['office', 'Офис'], ['delivery', 'Доставка']] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setRightScope(k)} className={`h-7 px-2.5 rounded text-xs ${rightScope === k ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-md overflow-auto" style={{ maxHeight: '70vh' }}>
+              <table className="text-sm">
+                <thead className="sticky top-0 bg-white z-10">
                   <tr className="text-gray-500 text-left border-b border-gray-200">
-                    <th className="p-2 font-medium">Право</th>
-                    {POSITIONS.map((p) => <th key={p} className="p-2 font-medium text-center">{p}</th>)}
+                    <th className="p-2 font-medium sticky left-0 bg-white min-w-[320px]">Право</th>
+                    {POSITIONS.map((p) => <th key={p} className="p-2 font-medium text-center min-w-[84px]"><div className="-rotate-0 text-xs whitespace-nowrap">{p}</div></th>)}
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(RIGHTS).map(([code, label]) => (
-                    <tr key={code} className="border-b border-gray-100 last:border-0">
-                      <td className="p-2"><span className="font-mono text-xs text-gray-400 mr-2">{code}</span>{label}</td>
-                      {POSITIONS.map((p) => (
-                        <td key={p} className="p-2 text-center">
-                          <input type="checkbox" checked={(roleRights[p] ?? []).includes(code)}
-                            onChange={() => toggleRoleRight(p, code)} />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                  {RIGHT_GROUPS.filter((g) => rightScope === 'all' || g.scope === rightScope).map((g) => {
+                    const q = rightSearch.trim().toLowerCase()
+                    const rows = g.rights.filter((r) => !q || r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q))
+                    if (rows.length === 0) return null
+                    return (
+                      <Fragment key={g.title}>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <td className="px-2 py-1.5 font-medium text-gray-700 text-xs uppercase sticky left-0 bg-gray-50">{g.title}</td>
+                          {POSITIONS.map((p) => {
+                            const codes = g.rights.map((r) => r.code)
+                            const all = codes.every((c) => (roleRights[p] ?? []).includes(c))
+                            return (
+                              <td key={p} className="px-2 py-1 text-center">
+                                <button onClick={() => codes.forEach((c) => { if ((roleRights[p] ?? []).includes(c) === all) toggleRoleRight(p, c) })}
+                                  title={all ? 'снять группу' : 'выдать группу'} className="text-[10px] text-gray-400 hover:text-emerald-600">{all ? '✓все' : 'все'}</button>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                        {rows.map((r) => (
+                          <tr key={r.code} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="p-2 sticky left-0 bg-white"><span className="font-mono text-xs text-gray-400 mr-2">{r.code}</span>{r.name}</td>
+                            {POSITIONS.map((p) => (
+                              <td key={p} className="p-2 text-center">
+                                <input type="checkbox" checked={(roleRights[p] ?? []).includes(r.code)} onChange={() => toggleRoleRight(p, r.code)} />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

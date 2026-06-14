@@ -299,14 +299,14 @@ export default function OrderScreen() {
             {[
               { label: 'Скидка', on: () => setDiscount(), disabled: !pos.can('F_ID') },
               { label: 'Надбавка', on: () => setSurcharge(), disabled: !pos.can('F_ID') },
-              { label: 'Сменить официанта', on: () => setWaiterPick(true), disabled: false },
+              { label: 'Сменить официанта', on: () => setWaiterPick(true), disabled: !pos.can('F_COW') },
               { label: `Тип заказа: ${TYPE_LABEL[order.type]}`, on: () => setTypePick(true), disabled: false },
               ...(est.tab ? [{ label: order.tabName ? `Барный счёт: ${order.tabName}` : 'Открыть барный счёт (Tab)', on: () => { const n = window.prompt('Название барного счёта (имя гостя/карта):', order.tabName ?? ''); if (n != null) pos.setOrderTab(order.id, n.trim() || undefined) }, disabled: false }] : []),
               ...(est.courses ? [{ label: selUid ? 'Курс подачи позиции' : 'Курсы подачи', on: () => setCoursePick(true), disabled: false }] : []),
               { label: `Ценовая категория: ${pos.priceCategories.find((c) => c.id === pos.activePriceCategory)?.name ?? 'Базовая'}`, on: () => setCatPick(true), disabled: false },
               ...(est.iikoCard && pos.loyaltyProgram.active ? [{ label: loyaltyCard ? `Карта гостя: ${loyaltyCard.owner}` : 'Карта гостя (iikoCard)', on: () => { setGuestCard(true); setCardNum('') }, disabled: false }] : []),
               ...(isRest ? [{ label: 'Перенести заказ на стол', on: () => setShowTransfer(true), disabled: false }] : []),
-              { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 },
+              { label: 'Объединить с другим заказом', on: () => setMergeOpen(true), disabled: pos.orders.length < 2 || !pos.can('F_MPR') },
               ...(isRest && order.guests > 1 ? [{ label: 'Оплата по гостям', on: () => setGuestPay(true), disabled: false }] : []),
               ...(est.comments ? [{ label: selUid ? 'Комментарий к позиции' : 'Комментарий к заказу', on: () => { const c = window.prompt('Комментарий:', (selUid && selLine?.comment) || ''); if (c != null) { if (selUid) pos.setLineComment(selUid, c); else if (c) printToast('Комментарий сохранён') } }, disabled: false }] : []),
             ].map((it) => (

@@ -38,6 +38,9 @@ export default function OfficeDelivery() {
 
   const s = pos.deliverySettings
   const courierName = (id?: string) => pos.couriers.find((c) => c.id === id)?.name ?? '—'
+  // право D_* учитывается, если на терминале есть авторизованный сотрудник (в чистом офисе без входа — не ограничиваем)
+  const allow = (code: string) => !pos.user || pos.can(code)
+  const maskPhone = (p: string) => (!pos.user || pos.can('D_SFN')) ? p : p.replace(/(\d{2})\d{3}(\d{2})/, '$1•••$2')
 
   const addItem = () => {
     const d = dishes.find((x) => x.id === pickDish); const q = parseInt(pickQty, 10) || 0
@@ -64,15 +67,16 @@ export default function OfficeDelivery() {
 
   const Stepper = ({ o }: { o: { id: number; status: DeliveryStatus; type: 'courier' | 'pickup' } }) => {
     if (o.status === 'cancelled' || o.status === 'closed') return null
-    const btn = (label: string, fn: () => void, cls = 'bg-blue-600') => <button onClick={fn} className={`h-7 px-2 rounded text-xs text-white ${cls}`}>{label}</button>
+    const btn = (label: string, fn: () => void, ok: boolean, cls = 'bg-blue-600') =>
+      <button onClick={fn} disabled={!ok} className={`h-7 px-2 rounded text-xs text-white disabled:opacity-30 ${cls}`}>{label}</button>
     return (
       <div className="flex gap-1 justify-end flex-wrap">
-        {o.status === 'new' && btn('(1) Подтв.', () => advance(o.id, 'confirmed'))}
-        {o.status === 'confirmed' && btn('(2) Готовить', () => advance(o.id, 'cooking'), 'bg-amber-500')}
-        {o.status === 'cooking' && btn('(3) Отправить', () => onSend(o), 'bg-violet-600')}
-        {o.status === 'onway' && btn('(4) Доставл.', () => advance(o.id, 'delivered'), 'bg-emerald-600')}
-        {o.status === 'delivered' && btn('(5) Закрыть', () => advance(o.id, 'closed'), 'bg-gray-600')}
-        {btn('(0) Отмена', () => doCancel(o.id), 'bg-rose-500')}
+        {o.status === 'new' && btn('(1) Подтв.', () => advance(o.id, 'confirmed'), allow('D_CND'))}
+        {o.status === 'confirmed' && btn('(2) Готовить', () => advance(o.id, 'cooking'), allow('D_MD'), 'bg-amber-500')}
+        {o.status === 'cooking' && btn('(3) Отправить', () => onSend(o), allow('D_AC'), 'bg-violet-600')}
+        {o.status === 'onway' && btn('(4) Доставл.', () => advance(o.id, 'delivered'), allow('D_MD'), 'bg-emerald-600')}
+        {o.status === 'delivered' && btn('(5) Закрыть', () => advance(o.id, 'closed'), allow('D_CD'), 'bg-gray-600')}
+        {btn('(0) Отмена', () => doCancel(o.id), allow('D_CAD'), 'bg-rose-500')}
       </div>
     )
   }
@@ -146,7 +150,7 @@ export default function OfficeDelivery() {
                   <tr key={o.id} className={`border-b border-gray-100 last:border-0 ${o.status === 'cancelled' ? 'opacity-50' : ''}`}>
                     <td className="p-2 font-medium">{o.no}<div className="text-xs text-gray-400">{o.type === 'pickup' ? 'самовывоз' : 'курьер'}</div></td>
                     <td><span className={`text-xs px-2 py-0.5 rounded-full ${STATUS[o.status].cls}`}>{STATUS[o.status].label}</span>{o.cancelReason ? <div className="text-xs text-rose-500">{o.cancelReason}</div> : null}</td>
-                    <td>{o.customerName}<div className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{o.phone}</div></td>
+                    <td>{o.customerName}<div className="text-xs text-gray-400 flex items-center gap-1"><Phone size={10} />{maskPhone(o.phone)}</div></td>
                     <td className="text-gray-600 text-xs max-w-[180px]">{o.address}</td>
                     <td className="text-gray-600 text-xs">{o.courierId ? courierName(o.courierId) : '—'}</td>
                     <td className="text-right">{formatTenge(o.goods + o.fee)}{o.fee > 0 && <div className="text-xs text-gray-400">+дост. {formatTenge(o.fee)}</div>}</td>
@@ -168,11 +172,11 @@ export default function OfficeDelivery() {
                 {pos.deliveryCustomers.map((c) => (
                   <tr key={c.id} className={`border-b border-gray-100 last:border-0 ${c.highRisk ? 'bg-rose-50' : ''}`}>
                     <td className="p-2">{c.name}</td>
-                    <td className="text-gray-500">{c.phone}</td>
+                    <td className="text-gray-500">{maskPhone(c.phone)}</td>
                     <td className="text-gray-500 text-xs">{c.street} {c.house}, кв.{c.apt} · {c.district}</td>
                     <td className="text-gray-500 text-xs">{c.adSource}</td>
                     <td className="text-center">
-                      <button onClick={() => pos.toggleHighRisk(c.id)} className={`text-xs px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${c.highRisk ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500'}`}>
+                      <button onClick={() => pos.toggleHighRisk(c.id)} disabled={!allow('D_AHR')} title={allow('D_AHR') ? '' : 'Нужно право D_AHR'} className={`text-xs px-2 py-0.5 rounded-full inline-flex items-center gap-1 disabled:opacity-50 ${c.highRisk ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500'}`}>
                         {c.highRisk && <AlertTriangle size={11} />}{c.highRisk ? 'да' : 'нет'}
                       </button>
                     </td>
