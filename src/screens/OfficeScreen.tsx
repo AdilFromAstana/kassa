@@ -23,6 +23,8 @@ import { buildStockMoves, turnoverByIngredient, reconstructOpening, ingredientLe
 import PivotTable from '../components/PivotTable'
 import type { PivotMeasure } from '../lib/pivot'
 import { buildAutoPostings } from '../lib/ledger'
+import { payables, payablesSummary } from '../lib/payables'
+import { dateSortKey } from '../lib/stockMoves'
 import { chartOfAccountsSeed } from '../mock/data'
 import { todayISO, formatRu, fromISO, toISO, addDaysISO } from '../lib/date'
 import { plannedHours } from '../lib/schedule'
@@ -117,7 +119,7 @@ export default function OfficeScreen() {
   const { establishment: est, setEstablishment, priceOf, setDishPrice, roleRights, toggleRoleRight,
     priceOverrides, priceCategories, categoryPrices, setCategoryPrice, addPriceCategory, removePriceCategory,
     ingredients, receiveStock, setIngredientStock, closedOrders, refunds, documents,
-    techCardOverrides, setTechCard, contractors, invoices, addContractor, addPurchase, addOutEsf,
+    techCardOverrides, setTechCard, contractors, invoices, invoicePaid, payInvoice, addContractor, addPurchase, addOutEsf,
     staffList, addStaff, updateStaff, removeStaff, priceOrders, createPriceOrder, activatePriceOrder, applyDuePriceOrders,
     salaryPayouts, paySalary, cashMovements, writeOffs, cashShift,
     paymentTypes, addPaymentType, updatePaymentType, removePaymentType,
@@ -174,7 +176,7 @@ export default function OfficeScreen() {
   const [newOt, setNewOt] = useState({ name: '', mode: 'dinein' as OrderType, vat: 16 as VatRate })
   const [menuCat, setMenuCat] = useState('base') // редактируемая ценовая категория в «Меню и цены»
   const [newCat, setNewCat] = useState('')
-  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'ledger'>('book')
+  const [financeTab, setFinanceTab] = useState<'book' | 'cashflow' | 'payables' | 'calendar' | 'ledger'>('book')
   const [rightSearch, setRightSearch] = useState('')
   const [rightScope, setRightScope] = useState<'all' | 'front' | 'office' | 'delivery'>('all')
   const [newSh, setNewSh] = useState({ name: '', from: '09:00', to: '18:00' })
@@ -2079,9 +2081,82 @@ export default function OfficeScreen() {
               Источник — наличные продажи, внесения/изъятия (вкл. инкассацию и выплаты ЗП), возвраты наличными, разменный фонд смены.
             </div>
             <Tabs active={financeTab} onChange={setFinanceTab} items={[
-              { id: 'book', label: 'Кассовая книга' }, { id: 'cashflow', label: 'ДДС (приток/отток)' }, { id: 'ledger', label: 'Бухучёт (план/проводки/ОСВ/баланс)' },
+              { id: 'book', label: 'Кассовая книга' }, { id: 'cashflow', label: 'ДДС (приток/отток)' }, { id: 'payables', label: 'Приём платежей' }, { id: 'calendar', label: 'Платёжный календарь' }, { id: 'ledger', label: 'Бухучёт (план/проводки/ОСВ/баланс)' },
             ]} />
-            {financeTab === 'ledger' ? <OfficeLedger /> : (() => {
+            {financeTab === 'payables' ? (() => {
+              const payList = payables(invoices, invoicePaid, dateSortKey(todayISO()))
+              const s = payablesSummary(payList)
+              const STAT: Record<string, { label: string; cls: string }> = {
+                paid: { label: 'оплачено', cls: 'bg-emerald-100 text-emerald-700' },
+                overdue: { label: 'просрочен', cls: 'bg-rose-100 text-rose-700' },
+                soon: { label: 'платёж ≤7 дней', cls: 'bg-blue-100 text-blue-700' },
+                outstanding: { label: 'задолженность', cls: 'bg-gray-100 text-gray-700' },
+              }
+              return (
+                <div>
+                  <div className="grid grid-cols-4 gap-3 mb-4">
+                    <OfficeStat label="Долг поставщикам" value={formatTenge(s.debt)} />
+                    <OfficeStat label="Просрочено" value={formatTenge(s.overdue)} />
+                    <OfficeStat label="К оплате ≤7 дней" value={formatTenge(s.soon)} />
+                    <OfficeStat label="Оплачено" value={formatTenge(s.paid)} />
+                  </div>
+                  <div className="text-xs text-gray-400 mb-2">Задолженность по приходным накладным. Срок оплаты = дата + 14 дн. Цвет статуса — как в iiko (🔴 просрочен / 🔵 ≤7 дней / 🟢 оплачено).</div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Накладная</th><th>Поставщик</th><th>Дата</th><th>Срок оплаты</th><th className="text-right">Сумма</th><th>Статус</th><th className="p-2 text-right">Действие</th></tr></thead>
+                      <tbody>
+                        {payList.length === 0 ? <tr><td colSpan={7} className="p-3 text-gray-400">Приходных накладных нет.</td></tr> : payList.map((p) => (
+                          <tr key={p.id} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{p.no}</td>
+                            <td>{p.supplierName}</td>
+                            <td className="text-gray-500 text-xs">{p.date.split(',')[0]}</td>
+                            <td className={`text-xs ${p.paid ? 'text-gray-400' : p.status === 'overdue' ? 'text-rose-600 font-medium' : p.status === 'soon' ? 'text-blue-600' : 'text-gray-500'}`}>{p.dueDate}{!p.paid ? ` · ${p.daysLeft < 0 ? `просрочен ${-p.daysLeft} дн` : `через ${p.daysLeft} дн`}` : ''}</td>
+                            <td className="text-right">{formatTenge(p.total)}</td>
+                            <td><span className={`text-xs px-2 py-0.5 rounded-full ${STAT[p.status].cls}`}>{STAT[p.status].label}</span></td>
+                            <td className="p-2 text-right">{p.paid ? <span className="text-emerald-600 text-xs">✓ оплачено</span> : <button onClick={() => { payInvoice(p.id); printToast(`Накладная ${p.no} · оплата принята`) }} className="h-7 px-3 rounded bg-blue-600 text-white text-xs">Оплатить</button>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">«Оплатить» фиксирует факт оплаты (статус). Платёжное поручение в банк и проводка погашения долга — на бэкенде.</div>
+                </div>
+              )
+            })() : financeTab === 'calendar' ? (() => {
+              const payList = payables(invoices, invoicePaid, dateSortKey(todayISO())).filter((p) => !p.paid)
+              const byDate: Record<string, { date: string; sum: number; count: number }> = {}
+              for (const p of payList) { const a = (byDate[p.dueDate] ??= { date: p.dueDate, sum: 0, count: 0 }); a.sum += p.total; a.count++ }
+              const sortKey = (d: string) => d.split('.').reverse().join('')
+              const rows = Object.values(byDate).sort((a, b) => sortKey(a.date).localeCompare(sortKey(b.date)))
+              const totalDue = +rows.reduce((s, r) => s + r.sum, 0).toFixed(2)
+              let cum = 0
+              return (
+                <div className="max-w-3xl">
+                  <div className="text-xs text-gray-500 mb-3">График предстоящих платежей поставщикам по срокам (неоплаченные накладные). Помогает заранее увидеть пики и кассовые разрывы.</div>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <OfficeStat label="Всего к оплате" value={formatTenge(totalDue)} />
+                    <OfficeStat label="Платёжных дат" value={String(rows.length)} />
+                    <OfficeStat label="Накладных" value={String(payList.length)} />
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Дата платежа</th><th className="text-right">Платежей</th><th className="text-right">Сумма к оплате</th><th className="text-right p-2">Накопительно</th></tr></thead>
+                      <tbody>
+                        {rows.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Предстоящих платежей нет (всё оплачено).</td></tr> : rows.map((r) => { cum = +(cum + r.sum).toFixed(2); return (
+                          <tr key={r.date} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{r.date}</td>
+                            <td className="text-right text-gray-500">{r.count}</td>
+                            <td className="text-right font-medium">{formatTenge(r.sum)}</td>
+                            <td className="text-right p-2 text-gray-600">{formatTenge(cum)}</td>
+                          </tr>
+                        ) })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">Поступления (план выручки) и остатки на счетах для авто-детекции разрыва — из плана/банка (на бэкенде). Здесь — фактический график оттоков по накладным.</div>
+                </div>
+              )
+            })() : financeTab === 'ledger' ? <OfficeLedger /> : (() => {
               const opening = cashShift?.openingCash ?? 0
               // разменный фонд показан отдельной строкой «начало смены»; его движение-внесение исключаем из «внесений», иначе двойной счёт
               const isFund = (m: { kind: 'in' | 'out'; type: string }) => m.kind === 'in' && /размен|фонд|начальн/i.test(m.type)

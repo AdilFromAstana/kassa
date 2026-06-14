@@ -66,6 +66,17 @@ describe('Бэк-офис → Обмен данными: смоук рендер
   })
 })
 
+describe('Бэк-офис → Финансы → Приём платежей / Платёжный календарь: смоук', () => {
+  it('вкладки приёма платежей и календаря рендерятся на демо-данных', () => {
+    render(<MemoryRouter><OfficeScreen /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'Финансы (касс. книга / ДДС)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Приём платежей' }))
+    expect(screen.getByText('Долг поставщикам')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Платёжный календарь' }))
+    expect(screen.getByText('Всего к оплате')).toBeTruthy()
+  })
+})
+
 describe('Бэк-офис → Избранное и Помощь: смоук рендера', () => {
   it('Избранное открывается и показывает плитки быстрого доступа', () => {
     render(<MemoryRouter><OfficeScreen /></MemoryRouter>)

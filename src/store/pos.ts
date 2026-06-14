@@ -96,6 +96,12 @@ function loadInvoices(): Invoice[] {
   try { const raw = localStorage.getItem('iiko-invoices'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return invoicesSeed.map((i) => ({ ...i }))
 }
+// Приём платежей / задолженность поставщикам: статус оплаты приходной накладной (invoiceId → оплачено).
+function loadInvoicePaid(): Record<number, boolean> {
+  try { const raw = localStorage.getItem('iiko-invoice-paid'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
+  return {}
+}
+function persistInvoicePaid(m: Record<number, boolean>) { void repo.saveConfig('iiko-invoice-paid', m) }
 
 // Сотрудники: справочник из офиса (карточки), seed из data.ts, поверх — сохранённые в localStorage.
 function loadStaff(): Staff[] {
@@ -352,6 +358,7 @@ interface PosState {
   messages: Message[] // внутренние сообщения / новости
   contractors: Contractor[] // поставщики (KZ, БИН/ИИН)
   invoices: Invoice[] // приходные накладные / входящие ЭСФ
+  invoicePaid: Record<number, boolean> // статус оплаты накладной (приём платежей / задолженность поставщикам)
   invSeq: number
   priceOrders: PriceOrder[] // приказы об изменении цен (Прейскурант)
   priceOrderSeq: number
@@ -505,6 +512,7 @@ interface PosState {
   addContractor: (name: string, bin: string) => void
   addPurchase: (supplierId: string, lines: InvoiceLine[], header?: { store?: string; date?: string; no?: string; esfNo?: string }) => Invoice | null // приходная + ЭСФ + приход на склад
   addOutEsf: (buyerId: string, amount: number) => Invoice | null // исходящая ЭСФ покупателю
+  payInvoice: (id: number) => void // отметить приходную накладную оплаченной (приём платежей)
   createStoreDoc: (type: DocType, lines: DocLine[], opts?: { reason?: string; store?: string; toStore?: string; result?: string }) => StoreDoc
   setEstablishment: (patch: Partial<Establishment>) => void
   priceOf: (dishId: string, basePrice: number) => number // эффективная цена (категория ?? оверрайд ?? базовая)
@@ -610,6 +618,7 @@ export const usePos = create<PosState>((set, get) => ({
   messages: messagesSeed.map((m) => ({ ...m })),
   contractors: loadContractors(),
   invoices: loadInvoices(),
+  invoicePaid: loadInvoicePaid(),
   invSeq: loadInvoices().length,
   priceOrders: loadPriceOrders(),
   priceOrderSeq: loadPriceOrders().length,
@@ -1286,6 +1295,11 @@ export const usePos = create<PosState>((set, get) => ({
     })
     return inv
   },
+  payInvoice: (id) => set((st) => {
+    const next = { ...st.invoicePaid, [id]: true }
+    persistInvoicePaid(next)
+    return { invoicePaid: next }
+  }),
   toggleRoleRight: (position, code) => set((st) => {
     const cur = st.roleRights[position] ?? []
     const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]
