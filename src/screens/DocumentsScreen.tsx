@@ -11,11 +11,12 @@ import type { DocType, DocLine, StoreDoc } from '../types'
 
 // «Документы» на кассе (iikoFront) — складские документы: акт списания/приготовления/переработки,
 // внутреннее перемещение, расходная накладная, инвентаризация. Приходной накладной на терминале нет (офис).
-const DOC_TYPES: DocType[] = ['Акт списания', 'Акт приготовления', 'Акт переработки', 'Внутреннее перемещение', 'Расходная накладная', 'Инвентаризация']
+const DOC_TYPES: DocType[] = ['Акт списания', 'Акт приготовления', 'Акт переработки', 'Внутреннее перемещение', 'Расходная накладная', 'Возврат поставщику', 'Инвентаризация']
 
 export default function DocumentsScreen() {
   const navigate = useNavigate()
-  const { ingredients, documents, createStoreDoc, writeoffReasons } = usePos()
+  const { ingredients, documents, createStoreDoc, writeoffReasons, contractors } = usePos()
+  const [supplier, setSupplier] = useState('') // поставщик для возврата
   const REASONS = writeoffReasons // причины списания из офиса (Розничные продажи)
   const [type, setType] = useState<DocType | null>(null)
   const [lines, setLines] = useState<DocLine[]>([])
@@ -33,12 +34,13 @@ export default function DocumentsScreen() {
   const [invSel, setInvSel] = useState<Record<string, boolean>>({})
   const [invFact, setInvFact] = useState<Record<string, string>>({})
 
-  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty(''); setInvStep(1); setInvSel({}); setInvFact({}) }
+  const reset = () => { setType(null); setLines([]); setQty(''); setReason(REASONS[0]); setStore(warehouses[0]); setToStore(warehouses[1]); setResultQty(''); setSupplier(''); setInvStep(1); setInvSel({}); setInvFact({}) }
   const isInv = type === 'Инвентаризация'
   const isWriteoff = type === 'Акт списания'
   const isTransfer = type === 'Внутреннее перемещение'
   const isMake = type === 'Акт приготовления' || type === 'Акт переработки'
   const isSale = type === 'Расходная накладная'
+  const isReturn = type === 'Возврат поставщику'
 
   const addLine = () => {
     const ing = ingredients.find((i) => i.id === ingId)
@@ -56,8 +58,9 @@ export default function DocumentsScreen() {
     const resIng = ingredients.find((i) => i.id === resultId)
     const opts = {
       ...(isWriteoff ? { reason } : {}),
-      ...(isTransfer || isSale ? { store } : {}),
+      ...(isTransfer || isSale || isReturn ? { store } : {}),
       ...(isTransfer ? { toStore } : {}),
+      ...(isReturn ? { reason: supplier ? 'Поставщику: ' + (contractors.find((c) => c.id === supplier)?.name ?? supplier) : 'Возврат поставщику' } : {}),
       ...(isMake && resIng ? { result: `${resIng.name} × ${resultQty} ${resIng.unit}` } : {}),
     }
     const doc = createStoreDoc(type, lines, opts)
@@ -218,8 +221,19 @@ export default function DocumentsScreen() {
               <div className="text-lg">{type}</div>
             </div>
 
-            {/* склады: для перемещения — источник+получатель, для расходной — склад-источник */}
-            {(isTransfer || isSale) && (
+            {/* поставщик — для возврата поставщику */}
+            {isReturn && (
+              <div className="mb-4 max-w-md">
+                <div className="text-white/60 text-sm mb-1">Поставщик (кому возвращаем)</div>
+                <select value={supplier} onChange={(e) => setSupplier(e.target.value)} className="w-full h-11 rounded-md px-2 bg-white text-gray-800">
+                  <option value="">— выбрать —</option>
+                  {contractors.map((c) => <option key={c.id} value={c.id}>{c.name} (БИН {c.bin})</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* склады: для перемещения — источник+получатель, для расходной/возврата — склад-источник */}
+            {(isTransfer || isSale || isReturn) && (
               <div className="flex items-end gap-3 mb-4">
                 <label className="flex-1">
                   <div className="text-white/60 text-sm mb-1">{isTransfer ? 'Склад-источник' : 'Склад списания'}</div>
