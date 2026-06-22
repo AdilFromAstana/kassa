@@ -12,3 +12,8 @@ npm-debug.log*
 
 # omc session state
 .omc/
+
+# telegram bot secrets / runtime state
+bot/.env
+bot/subscribers.json
+bot/node_modules

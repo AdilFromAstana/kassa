@@ -5,8 +5,11 @@ import BackButton from '../components/BackButton'
 import { usePos } from '../store/pos'
 import { dishes } from '../mock/menu'
 import { warehouses } from '../mock/data'
-import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
+import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield, modifierTechCards, modifierCost } from '../mock/warehouse'
+import { modifierGroups } from '../mock/menu'
 import { formatTenge } from '../lib/money'
+import { lowStock } from '../lib/stockAlerts'
+import { stockAt } from '../lib/storeStock'
 
 // «Товары и склады» (iikoOperation, упрощённо): остатки товаров-ингредиентов + техкарты блюд.
 // Остаток списывается по техкарте (брутто) при оплате заказа на кассе. См. iiko_spec/04_tovary_i_sklady.md.
@@ -15,14 +18,16 @@ const DEFAULT_STORE = warehouses[0] // «Основной склад»
 
 export default function WarehouseScreen() {
   const navigate = useNavigate()
-  const { ingredients, resetStock } = usePos()
+  const { ingredients, storeStock, resetStock } = usePos()
   const [tab, setTab] = useState<Tab>('stock')
   const [store, setStore] = useState<string>('all') // 'all' = все склады («Склад ▾», topic-604)
   const [openDish, setOpenDish] = useState<string | null>(null)
 
   const storeOf = (s?: string) => s ?? DEFAULT_STORE
-  const shown = store === 'all' ? ingredients : ingredients.filter((i) => storeOf(i.store) === store)
-  const lowCount = shown.filter((i) => i.stock < i.min).length
+  // остаток: «Все склады» → итог (i.stock); конкретный склад → из storeStock
+  const qtyOf = (i: typeof ingredients[number]) => (store === 'all' ? i.stock : stockAt(storeStock, i.id, store))
+  const shown = store === 'all' ? ingredients : ingredients.filter((i) => storeStock[i.id]?.[store] != null)
+  const alerts = lowStock(ingredients) // тревоги по ИТОГАМ (тот же селектор, что в TopBar/боте)
 
   return (
     <div className="h-full flex flex-col bg-pos-bg text-white">
@@ -45,8 +50,8 @@ export default function WarehouseScreen() {
               <option value="all">Все склады</option>
               {warehouses.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
-            {lowCount > 0 && (
-              <span className="flex items-center gap-1 text-pos-rose"><AlertTriangle size={15} />Ниже минимума: {lowCount}</span>
+            {alerts.count > 0 && (
+              <span className="flex items-center gap-1 text-pos-rose"><AlertTriangle size={15} />Ниже минимума: {alerts.count}{alerts.out.length > 0 && ` (закончилось: ${alerts.out.length})`}</span>
             )}
             <button onClick={resetStock} className="ml-auto flex items-center gap-1 text-white/60 hover:text-white">
               <RotateCcw size={14} />Сбросить остатки
@@ -68,8 +73,9 @@ export default function WarehouseScreen() {
             </thead>
             <tbody>
               {shown.map((i) => {
-                const neg = i.stock < 0
-                const low = !neg && i.stock < i.min
+                const q = qtyOf(i)
+                const neg = q < 0
+                const low = !neg && q <= i.min
                 return (
                   <tr key={i.id} className="border-b border-white/5">
                     <td className="py-1.5 px-2 text-white/50">{i.code}</td>
@@ -78,10 +84,10 @@ export default function WarehouseScreen() {
                     <td className="py-1.5 px-2 text-white/60">{i.unit}</td>
                     <td className="py-1.5 px-2 text-right text-white/70">{formatTenge(i.costPerUnit)}</td>
                     <td className={`py-1.5 px-2 text-right font-semibold ${neg ? 'text-pos-rose' : low ? 'text-amber-400' : ''}`}>
-                      {fmt(i.stock)}
+                      {fmt(q)}
                     </td>
                     <td className="py-1.5 px-2 text-right text-white/40">{fmt(i.min)}</td>
-                    <td className="py-1.5 px-2 text-right text-white/70">{formatTenge(Math.max(0, i.stock) * i.costPerUnit)}</td>
+                    <td className="py-1.5 px-2 text-right text-white/70">{formatTenge(Math.max(0, q) * i.costPerUnit)}</td>
                   </tr>
                 )
               })}
@@ -193,6 +199,35 @@ export default function WarehouseScreen() {
               })}
             </tbody>
           </table>
+
+          {/* Опен-меню: доп-ингредиенты модификаторов (списываются со склада + входят в себес блюда) */}
+          {(() => {
+            const rows = modifierGroups.flatMap((g) => g.options
+              .filter((o) => (modifierTechCards[o.id]?.length ?? 0) > 0)
+              .map((o) => ({ group: g.name, name: o.name, card: modifierTechCards[o.id], cost: modifierCost(o.id, ingredients) })))
+            if (rows.length === 0) return null
+            return (
+              <div className="mt-6">
+                <div className="text-white/50 text-xs uppercase mb-2">Доп-ингредиенты модификаторов (опен-меню)</div>
+                <table className="w-full text-sm border-collapse">
+                  <thead><tr className="text-white/50 text-left border-b border-white/10">
+                    <th className="py-2 px-2">Группа</th><th className="py-2 px-2">Модификатор</th><th className="py-2 px-2">Расход</th><th className="py-2 px-2 text-right">Себест. за ед.</th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r, idx) => (
+                      <tr key={idx} className="border-b border-white/5">
+                        <td className="py-1.5 px-2 text-white/50">{r.group}</td>
+                        <td className="py-1.5 px-2">{r.name}</td>
+                        <td className="py-1.5 px-2 text-white/60">{r.card.map((it) => `${ingredients.find((x) => x.id === it.ingredientId)?.name ?? it.ingredientId}: ${fmt(it.gross)}`).join(', ')}</td>
+                        <td className="py-1.5 px-2 text-right">{formatTenge(r.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-white/40 text-xs mt-2">Отрицательный расход = замена (снимается базовый ингредиент). При продаже доп-ингредиенты списываются со склада и поднимают себестоимость заказа.</div>
+              </div>
+            )
+          })()}
         </div>
       )}
 

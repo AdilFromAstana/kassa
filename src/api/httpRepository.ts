@@ -1,5 +1,12 @@
 import type { PosRepository, RuntimeSnapshot } from './contract'
 import { RUNTIME_KEY } from './contract'
+import { getToken } from './auth'
+
+// заголовки с JWT (если вошли) — Authorization: Bearer <token>
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const t = getToken()
+  return { ...(extra ?? {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) }
+}
 
 // ЗАГОТОВКА для бэкендера. Когда появится сервер:
 //  1) поднять REST по src/api/CONTRACT.md;
@@ -10,14 +17,14 @@ const BASE = (import.meta as unknown as { env?: Record<string, string> }).env?.V
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`${BASE}${path}`)
+    const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
     if (!res.ok) return fallback
     return (await res.json()) as T
   } catch { return fallback }
 }
 async function putJson(path: string, body: unknown): Promise<void> {
   try {
-    await fetch(`${BASE}${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    await fetch(`${BASE}${path}`, { method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) })
   } catch { /* TODO: очередь оффлайна */ }
 }
 
@@ -32,7 +39,7 @@ export const httpRepository: PosRepository = {
   saveRuntime: (snapshot: RuntimeSnapshot) => putJson(`/runtime`, snapshot),
   // DELETE /api/config/:key
   remove: async (key: string) => {
-    try { await fetch(`${BASE}/config/${encodeURIComponent(key)}`, { method: 'DELETE' }) } catch { /* ignore */ }
+    try { await fetch(`${BASE}/config/${encodeURIComponent(key)}`, { method: 'DELETE', headers: authHeaders() }) } catch { /* ignore */ }
   },
 }
 

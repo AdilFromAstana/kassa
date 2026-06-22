@@ -63,6 +63,10 @@ export function buildStockMoves(args: {
         const delta = r3(l.qty - (l.booked ?? 0)) // факт − учётный
         if (delta === 0) continue
         moves.push({ at: d.at, sortKey: dateSortKey(d.at), docType: 'Инвентаризация', docNo: `№${d.id}`, ingredientId: l.ingredientId, inQty: delta > 0 ? delta : 0, outQty: delta < 0 ? -delta : 0, store: d.store, corr: 'Инвентаризация (расхождение)', costPerUnit: costOf(l.ingredientId) })
+      } else if (d.type === 'Внутреннее перемещение' && d.toStore) {
+        // две ноги: расход из источника + приход в приёмник (итог по ингредиенту = 0, склады сходятся)
+        moves.push({ at: d.at, sortKey: dateSortKey(d.at), docType: d.type, docNo: `№${d.id}`, ingredientId: l.ingredientId, inQty: 0, outQty: r3(l.qty), store: d.store, corr: `→ ${d.toStore}`, costPerUnit: costOf(l.ingredientId) })
+        moves.push({ at: d.at, sortKey: dateSortKey(d.at), docType: d.type, docNo: `№${d.id}`, ingredientId: l.ingredientId, inQty: r3(l.qty), outQty: 0, store: d.toStore, corr: `← ${d.store}`, costPerUnit: costOf(l.ingredientId) })
       } else {
         const corr = d.reason ?? d.result ?? (d.toStore ? `→ ${d.toStore}` : d.type)
         moves.push({ at: d.at, sortKey: dateSortKey(d.at), docType: d.type, docNo: `№${d.id}`, ingredientId: l.ingredientId, inQty: 0, outQty: r3(l.qty), store: d.store, corr, costPerUnit: costOf(l.ingredientId) })

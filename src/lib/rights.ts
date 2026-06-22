@@ -86,6 +86,7 @@ export const RIGHT_GROUPS: RightGroup[] = [
     { code: 'B_PI', name: 'Инвентаризация: проведение' },
     { code: 'B_WOFFC', name: 'Акты списания: создание' },
     { code: 'B_PRODC', name: 'Акты приготовления: создание' },
+    { code: 'B_TRN', name: 'Перемещения: создание/проведение' },
   ] },
   { title: 'Офис: контрагенты', scope: 'office', rights: [
     { code: 'B_CTR', name: 'Контрагенты (базовое)' },
@@ -168,16 +169,29 @@ export const POSITION_RIGHTS: Record<string, string[]> = {
   Кассир: ['F_OCS', 'F_CS', 'F_CASH', 'F_APIO', 'F_DR', 'F_XR', 'F_CHO', 'F_CPBA', 'F_VRPT', 'F_CHPAY', 'F_CRCT', 'F_PAW', 'F_REP', 'F_OPIN', 'F_VPSD', 'F_REREP'],
   Менеджер: [
     ...codesOf('front'),
+    'B_TRN', // перемещения с кассы (модуль 9–11: менеджер создаёт)
     'D_ED', 'D_MD', 'D_CD', 'D_CAD', 'D_CND', 'D_AC', 'D_AHR', 'D_SFN', 'D_ACL', 'D_BDR',
+  ],
+  // Технолог — рецептуры/номенклатура/себестоимость/склад; без денег, кассы и зарплаты.
+  Технолог: [
+    'B_STO', 'B_VN', 'B_EN', 'B_EAC', 'B_INVV', 'B_VI', 'B_CI', 'B_PI', 'B_WOFFC', 'B_PRODC', 'B_TRN',
+    'B_MENOR', 'B_RPT', 'B_VSR', 'B_VREPORT',
   ],
   Управляющий: [
     'B_SALE', 'B_ACS', 'B_ACO', 'B_APT', 'B_STO', 'B_VN', 'B_EN', 'B_EAC', 'B_INVV', 'B_INVC', 'B_INVR', 'B_VI', 'B_CI', 'B_PI',
     'B_CTR', 'B_GUEST', 'B_SUPP', 'B_CHL', 'B_MENOR', 'B_ROMENOR', 'B_PMENOR', 'B_RPT', 'B_VSR', 'B_CASR', 'B_VREPORT', 'B_CUDS',
-    'B_PER', 'B_VE', 'B_PAY', 'B_EC', 'F_VRPT', 'D_MD', 'D_AC', 'D_ACL',
+    'B_PER', 'B_VE', 'B_PAY', 'B_EC', 'B_TRN', 'F_VRPT', 'D_MD', 'D_AC', 'D_ACL',
   ],
   Бухгалтер: [
     'B_FIN', 'B_VCOA', 'B_ECOA', 'B_ECB', 'B_ECFA', 'B_BKI', 'B_VBALR', 'B_VCFR', 'B_RPT', 'B_VSR', 'B_CASR',
     'B_STO', 'B_VN', 'B_INVV', 'B_CTR', 'B_SUPP', 'B_PER', 'B_VE', 'B_EPP', 'B_PAY', 'B_EXC', 'B_CCLP', 'B_CEDT', 'B_VREPORT',
+  ],
+  // Собственник — видит всё по сети (отчёты/OLAP/финансы/кадры), операционку не редактирует.
+  Собственник: [
+    'B_SALE', 'B_ACO', 'B_STO', 'B_VN', 'B_INVV', 'B_VI', 'B_CTR', 'B_GUEST', 'B_SUPP',
+    'B_FIN', 'B_VCOA', 'B_VBALR', 'B_VCFR', 'B_PER', 'B_VE', 'B_VP', 'B_EPP', 'B_PAY', 'B_MENOR',
+    'B_RPT', 'B_VSR', 'B_CASR', 'B_VREPORT', 'B_EREPORT', 'B_CUDS', 'B_SYNC_MON', 'B_VCPS',
+    'F_VRPT', 'F_VOS',
   ],
   Администратор: [...ALL_RIGHT_CODES],
 }

@@ -1,0 +1,13 @@
+{
+  "name": "iiko-pos-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram-бот сводок/отчётов для iiko-pos (модуль B): авто-сводка на закрытии смены + кнопки-отчёты бастыку",
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

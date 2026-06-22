@@ -2,12 +2,29 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, UserRound, Info, CreditCard } from 'lucide-react'
 import { usePos } from '../store/pos'
+import { loginByPin, loginByCard as authCard } from '../api/auth'
+import { catalogDishes, catalogStock, catalogMenu } from '../api/domain'
+import { getAuth } from '../api/auth'
+import { setActivePoint } from '../api/activePoint'
+import { hydrateMenu } from '../mock/menu'
 import { fiscalRegistrators } from '../mock/data'
 import NumPad from '../components/NumPad'
 import type { Staff } from '../types'
 
 // Стартовый экран: вход по 4-значному PIN, из списка сотрудников или по магнитной карте → выбор должности.
 type Mode = 'pin' | 'list' | 'card'
+
+// После входа в бэк — подтянуть с сервера эффективные цены точки И остатки склада в стор (касса = серверные данные).
+async function loadServerPrices() {
+  const tp = getAuth()?.tradePointId; if (tp) setActivePoint(tp) // касса работает в точке своего терминала (не офисный переключатель)
+  const [cat, stock, menu] = await Promise.all([catalogDishes(), catalogStock(), catalogMenu()])
+  hydrateMenu(menu) // структура меню с бэка (мутирует mock-массивы; цены — через priceOverrides ниже)
+  if (cat) usePos.setState((st) => ({ priceOverrides: { ...st.priceOverrides, ...Object.fromEntries(cat.map((d) => [d.id, d.price])) } }))
+  if (stock) {
+    const m = Object.fromEntries(stock.map((s) => [s.ingredientId, s.qty]))
+    usePos.setState((st) => ({ ingredients: st.ingredients.map((i) => (i.id in m ? { ...i, stock: m[i.id] } : i)) }))
+  }
+}
 
 export default function LoginScreen() {
   const navigate = useNavigate()
@@ -21,9 +38,16 @@ export default function LoginScreen() {
   const [authed, setAuthed] = useState<Staff | null>(null)
   const [showInfo, setShowInfo] = useState(false)
 
-  const submit = (value: string) => {
-    const s = login(value)
-    // в режиме списка PIN должен принадлежать выбранному сотруднику
+  const submit = async (value: string) => {
+    // Сначала реальный бэкенд (JWT + сервер решает, кто вошёл); при недоступности — локальный мок.
+    const remote = await loginByPin(value)
+    if (remote && (!picked || picked.pin === value)) {
+      await loadServerPrices() // серверные цены точки → стор
+      const s: Staff = { id: 'srv-' + value, name: remote.employee ?? 'Сотрудник', pin: value, positions: remote.positions ?? [] }
+      usePos.setState({ user: s }); setAuthed(s); setError('')
+      return
+    }
+    const s = login(value) // фолбэк: локальный мок (бэк недоступен)
     if (s && (!picked || s.id === picked.id)) { setAuthed(s); setError('') }
     else { setError(picked ? `Неверный PIN для ${picked.name.split(' ')[0]}` : 'Неверный PIN'); setPin('') }
   }
@@ -42,8 +66,15 @@ export default function LoginScreen() {
   const switchMode = (m: Mode) => { setMode(m); backToStart() }
 
   // прокатка магнитной карты (мок ридера)
-  const swipe = (value: string) => {
-    const s = loginByCard(value)
+  const swipe = async (value: string) => {
+    const remote = await authCard(value)
+    if (remote) {
+      await loadServerPrices() // серверные цены точки → стор
+      const s: Staff = { id: 'srv-card', name: remote.employee ?? 'Сотрудник', pin: '', positions: remote.positions ?? [], card: value }
+      usePos.setState({ user: s }); setAuthed(s); setCardErr('')
+      return
+    }
+    const s = loginByCard(value) // фолбэк: локальный мок
     if (s) { setAuthed(s); setCardErr('') }
     else { setCardErr('Карта не распознана'); setCard('') }
   }

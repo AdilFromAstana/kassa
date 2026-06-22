@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Lock, ListOrdered, Receipt, Puzzle, Wrench, Power, TriangleAlert } from 'lucide-react'
+import { Lock, ListOrdered, Receipt, Puzzle, Wrench, Power, TriangleAlert, PackageX } from 'lucide-react'
 import { usePos } from '../store/pos'
+import { lowStock } from '../lib/stockAlerts'
 import { attendance } from '../mock/data'
 import { printToast } from '../lib/print'
 import CashMovementModal from '../components/CashMovementModal'
@@ -14,6 +15,7 @@ export default function MainMenuScreen() {
   const navigate = useNavigate()
   const pos = usePos()
   const { user, personalShift, cashShift, openCashShift, openPersonalShift, closePersonalShift, logout, startOrder } = pos
+  const stock = lowStock(pos.ingredients)
   const est = pos.establishment
   const isRest = est.mode === 'restaurant'
   const [cashModal, setCashModal] = useState<'in' | 'out' | null>(null)
@@ -48,6 +50,11 @@ export default function MainMenuScreen() {
         <div className="text-xs text-gray-500">iiko POS v0.1 (мок) · {new Date().toLocaleString('ru-RU')}</div>
         <div className="flex items-center gap-3 text-sm text-gray-600">
           <span>{cashShift ? 'Смена открыта' : 'Смена закрыта'}{user ? ` · ${user.name}` : ''}</span>
+          {/* индикатор низкого остатка склада (модуль 2) — клик ведёт на склад */}
+          <button onClick={() => navigate('/warehouse')} className="relative text-gray-700" title="Остатки склада">
+            <PackageX size={18} className={stock.severity === 'out' ? 'text-pos-rose' : stock.severity === 'low' ? 'text-amber-500' : 'text-gray-400'} />
+            {stock.count > 0 && <span className={`absolute -top-1.5 -right-1.5 text-white text-[10px] rounded-full min-w-4 h-4 px-1 flex items-center justify-center font-bold ${stock.severity === 'out' ? 'bg-pos-rose' : 'bg-amber-500'}`}>{stock.count}</span>}
+          </button>
           <button onClick={() => { logout(); navigate('/') }} className="text-gray-700" title="Заблокировать"><Lock size={18} /></button>
         </div>
       </div>

@@ -46,6 +46,18 @@ export interface Ingredient {
   store?: string        // склад хранения (фильтр «Склад ▾» в остатках); по умолч. «Основной склад»
 }
 
+// Уведомления (хаб). Сейчас: low-stock; позже — Telegram/смена/прочее (модуль B «хаб уведомлений»).
+export interface AppNotification {
+  id: string
+  kind: 'low_stock' | 'out_of_stock'
+  severity: 'info' | 'warn' | 'crit'
+  title: string
+  body?: string
+  at: string        // время появления (полное)
+  read: boolean
+  ref?: string      // ссылка на сущность (напр. ingredientId)
+}
+
 // Строка техкарты (ТТК): закладка ингредиента на 1 порцию блюда.
 // Списание и себестоимость считаются по БРУТТО; потери — расчётные (нетто/выход) для калькуляционной карты.
 // Нетто = Брутто × (1 − потери хол. %/100); Выход = Нетто × (1 − потери гор. %/100). См. iiko_spec/04_tovary_i_sklady.md.
@@ -486,6 +498,7 @@ export interface Establishment {
   fiscalBeforePay: boolean // раздельная печать фискального чека перед оплатой (iikoFront 9.x, приходит из офиса)
   frCount: 1 | 2         // число фискальных регистраторов
   serviceCharge?: { active: boolean; percent: number } // сервисный сбор (авто-надбавка на заказ, раздел 03)
+  waiterCommissionPct?: number // комиссия официанта, % от личной выручки (расчёт при закрытии смены); дефолт 3
 }
 
 export interface ClosedShift {

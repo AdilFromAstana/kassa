@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { Check, Monitor, Trash2, Plus } from 'lucide-react'
 import { usePos, lineTotal, lineUnitPrice, DEFAULT_OKLAD, DEFAULT_HOUR_RATE, defaultPayMode } from '../store/pos'
 import { printToast } from '../lib/print'
+import { reportSales, reportPnl, reportBalance, reportExtra, type ServerSales, type ServerPnl, type ServerBalance, type ServerReportsExtra } from '../api/domain'
+import { getStructure, addLegal, delLegal, addDivision, delDivision, addPoint, delPoint, addWarehouse, delWarehouse, type StructLegal } from '../api/structure'
+import { getAssortment, setAssortment, type AssortmentDish } from '../api/domain'
+import { listUsers, createUser, updateUser, type OfficeUser } from '../api/officeUsers'
+import { getTradePoint, setActivePoint } from '../api/activePoint'
 import { menuGroups, dishesByGroup, dishes, findDish } from '../mock/menu'
 import { attendance, warehouses } from '../mock/data'
 import OfficeDelivery from './OfficeDelivery'
@@ -15,11 +20,12 @@ import OfficeAdmin from './OfficeAdmin'
 import OfficeContractors from './OfficeContractors'
 import OfficeExchange from './OfficeExchange'
 import OfficeHelp from './OfficeHelp'
-import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield } from '../mock/warehouse'
+import { techCards, dishCost, dishMaxPortions, itemNetto, itemYield, dishYield, orderLineCost } from '../mock/warehouse'
 import { RIGHTS, POSITIONS, RIGHT_GROUPS } from '../lib/rights'
 import { formatTenge, vatBreakdown } from '../lib/money'
 import { downloadExcel, xlsNum } from '../lib/export'
 import { buildStockMoves, turnoverByIngredient, reconstructOpening, ingredientLedger } from '../lib/stockMoves'
+import { bestWaiter, topDishesByDay, footfall } from '../lib/salesReports'
 import PivotTable from '../components/PivotTable'
 import type { PivotMeasure } from '../lib/pivot'
 import { buildAutoPostings } from '../lib/ledger'
@@ -139,6 +145,8 @@ export default function OfficeScreen() {
   const allowed = ROLE_SECTIONS[role]
   const visibleNav = NAV.filter((n) => allowed.includes(n.id))
   useEffect(() => { if (!allowed.includes(section)) setSection(allowed[0]) }, [role]) // роль сменилась → перейти на доступный раздел
+  // Демо: авто-вход офиса (owner) → JWT для доменных вызовов бэка (dual-write цен/справочников)
+  useEffect(() => { import('../api/auth').then((a) => { if (a.getAuth()?.kind !== 'office') void a.loginOffice('owner@mumtaz.kz', 'owner123') }) }, [])
   const [editDish, setEditDish] = useState('')
   // бухгалтерия (KZ)
   const [cName, setCName] = useState(''); const [cBin, setCBin] = useState('')
@@ -187,7 +195,8 @@ export default function OfficeScreen() {
   // мотивация (раздел payroll)
   const [newMotiv, setNewMotiv] = useState({ name: '', scope: 'all' as 'all' | 'dish' | 'group', targetId: '', mode: 'percent' as 'percent' | 'perUnit', value: '', minQty: '' })
   // отчёты (раздел reports)
-  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'turnover' | 'movement' | 'torg29' | 'stock' | 'vat' | 'olap' | 'custom' | 'postings' | 'pnl'>('sales')
+  const [report, setReport] = useState<'sales' | 'avg' | 'revenue' | 'topdishes' | 'footfall' | 'unsold' | 'purchases' | 'dishdetail' | 'whereused' | 'turnover' | 'movement' | 'torg29' | 'stock' | 'vat' | 'olap' | 'custom' | 'postings' | 'pnl'>('sales')
+  const [footfallCut, setFootfallCut] = useState<'day' | 'hour'>('day') // проходимость: разрез по дням / часам
   const [moveIng, setMoveIng] = useState(ingredients[0]?.id ?? '') // Движение товара (606): выбранный товар
   const [revCut, setRevCut] = useState<'day' | 'category' | 'waiter' | 'payment' | 'hour'>('payment') // Отчёты по выручке (topic-110): разрез
   const [salesMode, setSalesMode] = useState<'byDish' | 'byDay'>('byDish')
@@ -291,13 +300,14 @@ export default function OfficeScreen() {
   // ───────── данные для отчётов (раздел reports) ─────────
   const noVat = (x: number, rate = 16) => +(x / (1 + rate / 100)).toFixed(2) // оборот без ҚҚС по ставке позиции
   const dayKey = (s: string) => s.split(',')[0] ?? s // fullNow() = "dd.mm.yyyy, hh:mm"
-  const lineCost = (dishId: string, qty: number) => dishCost(dishId, ingredients, techCardOverrides) * qty
+  // Себес строки = блюдо + доп-ингредиенты модификаторов (опен-меню): доп мясо поднимает себес/COGS.
+  const lineCost = (l: typeof closedOrders[number]['lines'][number]) => orderLineCost(l, ingredients, techCardOverrides)
 
   // продажи по блюдам: выручка / себест. / валовая прибыль / наценка (ставка ҚҚС — у каждой позиции своя)
   const salesByDish = Object.values(closedOrders.reduce((acc, o) => {
     for (const l of o.lines) {
       const a = (acc[l.dishId] ??= { name: l.name, qty: 0, rev: 0, cost: 0, vat: l.vat })
-      a.qty += l.qty; a.rev += lineTotal(l); a.cost += lineCost(l.dishId, l.qty)
+      a.qty += l.qty; a.rev += lineTotal(l); a.cost += lineCost(l)
     }
     return acc
   }, {} as Record<string, { name: string; qty: number; rev: number; cost: number; vat: number }>)).sort((a, b) => b.rev - a.rev)
@@ -450,7 +460,7 @@ export default function OfficeScreen() {
   const stockValue = ingredients.reduce((s, i) => s + i.stock * i.costPerUnit, 0)
 
   // P&L (упрощённо): выручка без НДС − себестоимость проданного − ФОТ (оклады + СО 3.5%)
-  const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l.dishId, l.qty), 0), 0).toFixed(2)
+  const cogs = +closedOrders.reduce((s, o) => s + o.lines.reduce((x, l) => x + lineCost(l), 0), 0).toFixed(2)
   const payrollBase = staffList.reduce((s, p) => s + okladOf(p.id), 0) // оклады (gross)
   const payrollEmployer = staffList.reduce((s, p) => s + kzTax(okladOf(p.id)).employerCost, 0) // полная стоимость ФОТ с взносами РК
   const grossProfit = +(netRevenue - cogs).toFixed(2)
@@ -553,7 +563,10 @@ export default function OfficeScreen() {
       <div className="flex-1 overflow-auto">
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6">
           <div className="font-semibold">{SECTION_TITLE[section]}</div>
-          <div className="ml-auto text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</div>
+          <div className="ml-auto flex items-center gap-3">
+            <PointSwitcher />
+            <span className="text-xs text-gray-400">конфиг уезжает на кассу · сохраняется в localStorage</span>
+          </div>
         </div>
 
         {section === 'favorites' ? (
@@ -571,7 +584,7 @@ export default function OfficeScreen() {
         ) : section === 'help' ? (
           <OfficeHelp />
         ) : section === 'corp' ? (
-          <OfficeCorp />
+          <div><div className="p-6 pb-0"><ServerStructure /></div><OfficeCorp /></div>
         ) : section === 'settings' ? (
           <div className="p-6 max-w-3xl">
             <div className="text-xs text-gray-500 mb-5">
@@ -624,6 +637,16 @@ export default function OfficeScreen() {
                 </label>
               </div>
               <div className="text-xs text-gray-400 mt-1">Применяется ко всем новым заказам кассы (снимок % в заказ при открытии). Входит в чек и облагается ҚҚС.</div>
+
+              <div className="text-gray-500 text-xs uppercase mb-2 mt-5">Комиссия официанта (расчёт при закрытии смены)</div>
+              <div className="flex items-center gap-4 bg-white border border-gray-200 rounded-md p-3 max-w-md">
+                <label className="flex items-center gap-2 text-sm text-gray-500">Ставка, % от личной выручки
+                  <input type="number" min={0} max={100} value={est.waiterCommissionPct ?? 3}
+                    onChange={(e) => setEstablishment({ waiterCommissionPct: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })}
+                    className="w-20 h-9 rounded border border-gray-300 px-2 text-right" />
+                </label>
+              </div>
+              <div className="text-xs text-gray-400 mt-1">При закрытии кассовой смены по каждому официанту считается комиссия = его выручка × ставка (видно сразу в мастере закрытия).</div>
             </div>
           </div>
         ) : section === 'menu' ? (
@@ -631,6 +654,7 @@ export default function OfficeScreen() {
             <div className="text-xs text-gray-500 mb-5">
               Цены меню. Изменённая цена сразу применяется на кассе (для новых позиций в заказе). Услуги без цены тоже здесь.
             </div>
+            <ServerAssortment />
 
             {/* Быстрое меню (05): раскладка групп по страницам кассы (I/II/III) */}
             <div className="mb-6">
@@ -987,6 +1011,7 @@ export default function OfficeScreen() {
           <OfficeLoyalty />
         ) : section === 'staff' ? (
           <div className="p-6 max-w-4xl">
+            <ServerOfficeUsers />
             <div className="text-xs text-gray-500 mb-5">
               Роли и права (как в iikoOffice). Галочки задают, что разрешено должности; касса применяет сразу
               (стоп-лист, возврат, смена, деньги, скидки, отчёты, явки и т.д.).
@@ -1279,23 +1304,27 @@ export default function OfficeScreen() {
             </div>
 
             {/* сводка-шапка */}
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-4 gap-3 mb-3">
               <OfficeStat label="Выручка" value={formatTenge(revenue)} />
               <OfficeStat label="Чеков" value={String(closedOrders.length)} />
               <OfficeStat label="Средний чек" value={formatTenge(avg)} />
               <OfficeStat label="Возвраты" value={formatTenge(refSum)} />
             </div>
 
+            {/* серверная сводка (читается с бэкенда /reports/sales) */}
+            <ServerSalesBanner />
+            <ServerReportsExtra />
+
             {/* вкладки отчётов */}
             <Tabs active={report} onChange={setReport}
               items={[
-                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP по продажам' }, { id: 'custom', label: 'Настраиваемый' }, { id: 'postings', label: 'OLAP по проводкам' }, { id: 'pnl', label: 'Прибыли и убытки' },
+                { id: 'sales', label: 'Продажи за период' }, { id: 'avg', label: 'Средний чек' }, { id: 'revenue', label: 'По выручке' }, { id: 'topdishes', label: 'Топ-5 блюд по дням' }, { id: 'footfall', label: 'Проходимость (гости)' }, { id: 'unsold', label: 'Непродаваемые' }, { id: 'purchases', label: 'Закупки' }, { id: 'dishdetail', label: 'По блюдам' }, { id: 'whereused', label: 'Вхождение товара' }, { id: 'turnover', label: 'Товарная ОСВ' }, { id: 'movement', label: 'Движение товара' }, { id: 'torg29', label: 'Товарный отчёт' }, { id: 'stock', label: 'Остатки на складах' }, { id: 'vat', label: 'ҚҚС (НДС)' }, { id: 'olap', label: 'OLAP по продажам' }, { id: 'custom', label: 'Настраиваемый' }, { id: 'postings', label: 'OLAP по проводкам' }, { id: 'pnl', label: 'Прибыли и убытки' },
               ]}
               right={<>
-                {!['olap', 'pnl', 'custom', 'postings'].includes(report) && (
+                {!['olap', 'pnl', 'custom', 'postings', 'topdishes', 'footfall'].includes(report) && (
                   <button onClick={exportExcel} className="ml-auto h-8 self-center px-3 rounded bg-emerald-600 text-white text-xs">Excel…</button>
                 )}
-                <button onClick={exportTo1C} className={`${!['olap', 'pnl', 'custom', 'postings'].includes(report) ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
+                <button onClick={exportTo1C} className={`${!['olap', 'pnl', 'custom', 'postings', 'topdishes', 'footfall'].includes(report) ? '' : 'ml-auto'} h-8 self-center px-3 rounded bg-slate-700 text-white text-xs`}>Выгрузить в 1С (JSON)</button>
               </>} />
 
             {/* 1. Продажи за период */}
@@ -1395,6 +1424,12 @@ export default function OfficeScreen() {
                   ))}
                   <span className="ml-auto text-sm text-gray-500">Итого выручка: <b className="text-gray-800">{formatTenge(revTot.sum)}</b></span>
                 </div>
+                {revCut === 'waiter' && bestWaiter(closedOrders) && (
+                  <div className="mb-3 inline-flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-1.5 text-sm text-amber-800">
+                    🏆 Лучший официант: <b>{bestWaiter(closedOrders)!.waiter}</b>
+                    <span className="text-amber-600">· {bestWaiter(closedOrders)!.orders} зак. · {formatTenge(bestWaiter(closedOrders)!.revenue)}</span>
+                  </div>
+                )}
                 <div className="bg-white border border-gray-200 rounded-md overflow-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="text-gray-500 text-left border-b border-gray-200">
@@ -1416,6 +1451,69 @@ export default function OfficeScreen() {
                 <div className="text-xs text-gray-400 mt-2">Разрезы выручки из закрытых чеков. «По категориям» — заказ учитывается в каждой категории своих блюд; «По типам оплат» — по основному типу оплаты чека. Выручка станций по кассам — 1 ФР (мок).</div>
               </div>
             )}
+
+            {/* 1f. Топ-5 блюд по дням (модуль «топ по блюдам за неделю по дням») */}
+            {report === 'topdishes' && (() => {
+              const t = topDishesByDay(closedOrders, 5)
+              return (
+                <div>
+                  <div className="text-xs text-gray-500 mb-3">Топ-5 блюд по суммарному количеству за период, с разбивкой по дням (источник — закрытые чеки). Период = текущая смена (мок); при многодневных данных колонки = дни.</div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">Блюдо</th>
+                        {t.days.map((d) => <th key={d} className="text-right px-2">{d}</th>)}
+                        <th className="text-right p-2">Итого</th>
+                      </tr></thead>
+                      <tbody>
+                        {t.rows.length === 0 ? <tr><td colSpan={t.days.length + 2} className="p-3 text-gray-400">Нет продаж.</td></tr> : t.rows.map((r, i) => (
+                          <tr key={r.name} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2">{i === 0 ? '🥇 ' : ''}{r.name}</td>
+                            {t.days.map((d) => <td key={d} className="text-right px-2 text-gray-600">{r.byDay[d] ? +r.byDay[d].toFixed(2) : '—'}</td>)}
+                            <td className="text-right p-2 font-semibold">{+r.total.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* 1h. Проходимость (модуль «сколько человек пришло в ресторан») */}
+            {report === 'footfall' && (() => {
+              const f = footfall(closedOrders)
+              const rows = footfallCut === 'day' ? f.byDay : f.byHour
+              return (
+                <div>
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    {([['day', 'По дням'], ['hour', 'По часам']] as const).map(([m, l]) => (
+                      <button key={m} onClick={() => setFootfallCut(m)} className={`h-8 px-3 rounded text-sm ${footfallCut === m ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>{l}</button>
+                    ))}
+                    <span className="ml-auto text-sm text-gray-500">Всего гостей: <b className="text-gray-800">{f.total}</b>{f.peakHour && <> · пик: <b className="text-gray-800">{f.peakHour.key}</b> ({f.peakHour.guests})</>}</span>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-md overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-gray-500 text-left border-b border-gray-200">
+                        <th className="p-2">{footfallCut === 'day' ? 'Дата' : 'Час'}</th><th className="text-right">Гостей</th><th className="text-right">Чеков</th><th className="text-right p-2">Ср. гостей / чек</th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.length === 0 ? <tr><td colSpan={4} className="p-3 text-gray-400">Нет продаж.</td></tr> : rows.map((r) => (
+                          <tr key={r.key} className={`border-b border-gray-100 last:border-0 ${footfallCut === 'hour' && f.peakHour?.key === r.key ? 'bg-amber-50' : ''}`}>
+                            <td className="p-2">{r.key}{footfallCut === 'hour' && f.peakHour?.key === r.key ? ' 🔥' : ''}</td>
+                            <td className="text-right">{r.guests}</td>
+                            <td className="text-right text-gray-500">{r.checks}</td>
+                            <td className="text-right p-2 text-gray-600">{r.checks ? (r.guests / r.checks).toFixed(2) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {rows.length > 0 && <tfoot><tr className="border-t border-gray-200 font-semibold"><td className="p-2">Итого</td><td className="text-right">{f.total}</td><td className="text-right">{rows.reduce((s, r) => s + r.checks, 0)}</td><td className="p-2"></td></tr></tfoot>}
+                    </table>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">Источник — число гостей в закрытых чеках. «По часам» помогает увидеть пиковую загрузку зала.</div>
+                </div>
+              )
+            })()}
 
             {/* 1c. Непродаваемые блюда (topic-621) */}
             {report === 'unsold' && (
@@ -2290,3 +2388,245 @@ const OfficeStat = ({ label, value }: { label: string; value: string }) => (
 const FinRow = ({ k, v, b }: { k: string; v: string; b?: boolean }) => (
   <div className={`flex justify-between py-0.5 text-sm ${b ? 'font-semibold border-t border-gray-200 mt-1 pt-1' : 'text-gray-600'}`}><span>{k}</span><span>{v}</span></div>
 )
+
+// Сводка, прочитанная с БЭКЕНДА (/api/office/.../reports/{sales,pnl}) — доказывает чтение отчётов с сервера.
+function ServerSalesBanner() {
+  const [s, setS] = useState<ServerSales | null>(null)
+  const [pnl, setPnl] = useState<ServerPnl | null>(null)
+  const [bal, setBal] = useState<ServerBalance | null>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'off'>('loading')
+  useEffect(() => {
+    let on = true
+    reportSales().then((r) => { if (!on) return; if (r) { setS(r); setState('ok') } else setState('off') })
+    reportPnl().then((r) => { if (on && r) setPnl(r) })
+    reportBalance().then((r) => { if (on && r) setBal(r) })
+    return () => { on = false }
+  }, [])
+  if (state === 'off') return <div className="mb-5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">Сервер недоступен / нет авторизации — показаны локальные данные.</div>
+  return (
+    <div className="mb-5 rounded-md border border-emerald-300 bg-emerald-50 p-3">
+      <div className="text-xs font-semibold text-emerald-700 mb-1">С СЕРВЕРА · бэкенд /reports/sales + /reports/pnl + /reports/balance</div>
+      <div className="flex gap-6 text-sm text-gray-700 mb-1">
+        <span>Выручка: <b>{s ? formatTenge(s.revenue) : '…'}</b></span>
+        <span>Чеков: <b>{s?.checks ?? '…'}</b></span>
+        <span>Средний чек: <b>{s ? formatTenge(s.avgCheck) : '…'}</b></span>
+      </div>
+      <div className="flex gap-6 text-sm text-gray-600 border-t border-emerald-200 pt-1">
+        <span>P&L · выручка-нетто: <b>{pnl ? formatTenge(pnl.revenueNet) : '…'}</b></span>
+        <span>себест.: <b>{pnl ? formatTenge(pnl.cogs) : '…'}</b></span>
+        <span>валовая прибыль: <b className="text-emerald-700">{pnl ? formatTenge(pnl.grossProfit) : '…'}</b></span>
+      </div>
+      <div className="flex gap-6 text-sm text-gray-600 border-t border-emerald-200 pt-1 mt-1">
+        <span>Баланс (ОСВ) · Σ дебет: <b>{bal ? formatTenge(bal.totalDebitMovements) : '…'}</b></span>
+        <span>Σ кредит: <b>{bal ? formatTenge(bal.totalCreditMovements) : '…'}</b></span>
+        <span>{bal ? (Math.abs(bal.totalDebitMovements - bal.totalCreditMovements) < 0.01 ? <b className="text-emerald-700">✓ сходится</b> : <b className="text-red-600">расхождение</b>) : '…'}</span>
+      </div>
+    </div>
+  )
+}
+
+// Остальные витрины отчётов — все считаются на сервере (/reports/extra). Компактные таблицы, помеченные «С СЕРВЕРА».
+function ServerReportsExtra() {
+  const [d, setD] = useState<ServerReportsExtra | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { let on = true; reportExtra().then((r) => { if (on) setD(r) }); return () => { on = false } }, [])
+  if (!d) return null
+  const Tbl = ({ title, cols, rows }: { title: string; cols: string[]; rows: (string | number)[][] }) => (
+    <div className="mb-3">
+      <div className="text-xs font-semibold text-gray-600 mb-1">{title}</div>
+      <div className="bg-white border border-gray-200 rounded overflow-auto max-h-56">
+        <table className="w-full text-xs">
+          <thead><tr className="text-gray-400 text-left border-b border-gray-100">{cols.map((c, i) => <th key={i} className={`p-1.5 ${i > 0 ? 'text-right' : ''}`}>{c}</th>)}</tr></thead>
+          <tbody>
+            {rows.length === 0 ? <tr><td colSpan={cols.length} className="p-2 text-gray-300">нет данных</td></tr> : rows.map((r, ri) => (
+              <tr key={ri} className="border-b border-gray-50 last:border-0">{r.map((c, ci) => <td key={ci} className={`p-1.5 ${ci > 0 ? 'text-right' : ''}`}>{c}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+  return (
+    <div className="mb-5 rounded-md border border-sky-300 bg-sky-50 p-3">
+      <button onClick={() => setOpen((v) => !v)} className="text-xs font-semibold text-sky-700 mb-1">
+        {open ? '▾' : '▸'} Остальные отчёты С СЕРВЕРА · /reports/extra (по блюдам, категориям, официантам, дням, часам, непродаваемые, ҚҚС, закупки, товарная ОСВ, остатки)
+      </button>
+      {open && (
+        <div className="grid grid-cols-2 gap-x-5 mt-2">
+          <Tbl title="По блюдам (выручка / себест. / маржа)" cols={['Блюдо', 'Кол-во', 'Выручка', 'Себест.', 'Маржа']} rows={d.byDish.map((x) => [x.name, x.qty, formatTenge(x.revenue), formatTenge(x.cogs), formatTenge(x.margin)])} />
+          <Tbl title="По категориям" cols={['Категория', 'Выручка']} rows={d.byCategory.map((x) => [x.name, formatTenge(x.revenue)])} />
+          <Tbl title="По официантам" cols={['Официант', 'Чеков', 'Выручка']} rows={d.byWaiter.map((x) => [x.waiter, x.checks, formatTenge(x.revenue)])} />
+          <Tbl title="По дням" cols={['День', 'Чеков', 'Выручка']} rows={d.byDay.map((x) => [x.day, x.checks, formatTenge(x.revenue)])} />
+          <Tbl title="По часам" cols={['Час', 'Выручка']} rows={d.byHour.map((x) => [x.hour + ':00', formatTenge(x.revenue)])} />
+          <Tbl title="Непродаваемые" cols={['Блюдо', '']} rows={d.unsold.map((x) => [x.name, ''])} />
+          <Tbl title="ҚҚС (НДС)" cols={['Показатель', 'Сумма']} rows={[['Собрано с продаж', formatTenge(d.vat.collected)], ['Входящий с закупок', formatTenge(d.vat.input)], ['К уплате', formatTenge(d.vat.toPay)]]} />
+          <Tbl title={`Закупки (${d.purchases.count})`} cols={['Накладная', 'Поставщик', 'Сумма']} rows={d.purchases.items.map((x) => [x.no, x.supplierName, formatTenge(x.total)])} />
+          <Tbl title="Товарная ОСВ (нач/приход/расход/кон)" cols={['Товар', 'Нач', 'Приход', 'Расход', 'Кон']} rows={d.turnover.map((x) => [x.name, x.opening, x.in, x.out, x.closing])} />
+          <Tbl title="Остатки на складах" cols={['Товар', 'Склад', 'Кол-во', 'Себест.']} rows={d.stock.map((x) => [x.name, x.warehouse, x.qty, formatTenge(x.cost)])} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// C1: дерево структуры сети с сервера (Юрлицо → Подразделение → ТП → Склад) + CRUD.
+function ServerStructure() {
+  const [tree, setTree] = useState<StructLegal[] | null>(null)
+  const refresh = () => getStructure().then((t) => setTree(t))
+  useEffect(() => { void refresh() }, [])
+  if (!tree) return null
+  const ask = (msg: string) => { const v = window.prompt(msg); return v && v.trim() ? v.trim() : null }
+  return (
+    <div className="mb-6 rounded-md border border-indigo-200 bg-indigo-50/40 p-4">
+      <div className="flex items-center mb-2">
+        <div className="text-sm font-semibold text-indigo-800">Структура сети (с сервера)</div>
+        <button onClick={async () => { const n = ask('Название юрлица'); if (n) { await addLegal(n, ''); void refresh() } }} className="ml-auto h-8 px-3 rounded bg-indigo-600 text-white text-xs">+ Юрлицо</button>
+      </div>
+      {tree.length === 0 && <div className="text-gray-400 text-sm">Структура пуста.</div>}
+      {tree.map((le) => (
+        <div key={le.id} className="mb-2 bg-white rounded border border-gray-200 p-2">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">🏢 {le.name}</span><span className="text-gray-400 text-xs">{le.bin}</span>
+            <button onClick={async () => { const n = ask('Название подразделения'); if (n) { await addDivision(le.id, n); void refresh() } }} className="ml-auto h-7 px-2 rounded bg-gray-100 text-xs">+ Подразделение</button>
+            <button onClick={async () => { await delLegal(le.id); void refresh() }} className="h-7 px-2 rounded bg-rose-100 text-rose-700 text-xs">✕</button>
+          </div>
+          {le.divisions.map((dv) => (
+            <div key={dv.id} className="ml-5 mt-1 border-l border-gray-200 pl-3">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-700">🗂 {dv.name}</span>
+                <button onClick={async () => { const n = ask('Название точки'); if (n) { await addPoint(n, dv.id); void refresh() } }} className="ml-auto h-7 px-2 rounded bg-gray-100 text-xs">+ Точка</button>
+                <button onClick={async () => { await delDivision(dv.id); void refresh() }} className="h-7 px-2 rounded bg-rose-100 text-rose-700 text-xs">✕</button>
+              </div>
+              {dv.points.map((p) => (
+                <div key={p.id} className="ml-5 mt-1 border-l border-gray-200 pl-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-700">🏬 {p.name}</span>
+                    {p.tradePointId === getTradePoint() && <span className="text-emerald-600 text-[10px] bg-emerald-100 rounded px-1">активна</span>}
+                    <button onClick={() => { setActivePoint(p.tradePointId); window.location.reload() }} className="ml-auto h-7 px-2 rounded bg-indigo-100 text-indigo-700 text-xs">Выбрать</button>
+                    <button onClick={async () => { const n = ask('Название склада'); if (n) { await addWarehouse(p.id, n); void refresh() } }} className="h-7 px-2 rounded bg-gray-100 text-xs">+ Склад</button>
+                    <button onClick={async () => { await delPoint(p.id); void refresh() }} className="h-7 px-2 rounded bg-rose-100 text-rose-700 text-xs">✕</button>
+                  </div>
+                  {p.warehouses.map((w) => (
+                    <div key={w.id} className="ml-5 mt-0.5 flex items-center gap-2 text-sm text-gray-500">
+                      📦 {w.name}
+                      <button onClick={async () => { await delWarehouse(w.id); void refresh() }} className="h-6 px-2 rounded bg-rose-50 text-rose-600 text-xs">✕</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// C2: офисные пользователи сети — роль + скоуп по точкам (вся сеть / набор ТП) + активность.
+function ServerOfficeUsers() {
+  const [users, setUsers] = useState<OfficeUser[] | null>(null)
+  const [pts, setPts] = useState<{ tradePointId: string; name: string }[]>([])
+  const [nu, setNu] = useState({ email: '', password: '', role: 'manager', scope: [] as string[] })
+  const [msg, setMsg] = useState('')
+  const refresh = () => listUsers().then((u) => setUsers(u))
+  useEffect(() => { void refresh(); getStructure().then((t) => { if (t) setPts(t.flatMap((l) => l.divisions.flatMap((d) => d.points)).map((p) => ({ tradePointId: p.tradePointId, name: p.name }))) }) }, [])
+  const ptName = (id: string) => pts.find((p) => p.tradePointId === id)?.name ?? id.slice(0, 8)
+  const create = async () => {
+    setMsg('')
+    if (!nu.email.trim() || !nu.password) { setMsg('email и пароль обязательны'); return }
+    const r = await createUser(nu.email.trim(), nu.password, nu.role, nu.scope)
+    if (!r) { setMsg('не удалось (email занят?)'); return }
+    setNu({ email: '', password: '', role: 'manager', scope: [] }); void refresh()
+  }
+  if (!users) return null
+  return (
+    <div className="mb-6 rounded-md border border-violet-200 bg-violet-50/40 p-4">
+      <div className="text-sm font-semibold text-violet-800 mb-2">Офисные пользователи (доступ к бэк-офису) — С СЕРВЕРА</div>
+      <div className="bg-white border border-gray-200 rounded overflow-auto mb-3">
+        <table className="w-full text-sm">
+          <thead><tr className="text-gray-500 text-left border-b border-gray-200"><th className="p-2">Email</th><th>Роль</th><th>Доступ к точкам</th><th className="text-center">Активен</th></tr></thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className="border-b border-gray-100 last:border-0">
+                <td className="p-2 font-medium">{u.email}</td>
+                <td className="text-gray-600">{u.role}</td>
+                <td className="text-gray-600 text-xs">{u.wholeNetwork ? <span className="text-emerald-700">вся сеть</span> : u.pointScope.map(ptName).join(', ') || '—'}</td>
+                <td className="text-center">
+                  <input type="checkbox" checked={u.active} disabled={u.role === 'owner'} onChange={async () => { await updateUser(u.id, { active: !u.active }); void refresh() }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-gray-500 text-xs uppercase mb-2">Добавить пользователя</div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input value={nu.email} onChange={(e) => setNu({ ...nu, email: e.target.value })} placeholder="email" className="h-9 rounded border border-gray-300 px-2 w-52" />
+        <input value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} type="password" placeholder="пароль" className="h-9 rounded border border-gray-300 px-2 w-32" />
+        <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })} className="h-9 rounded border border-gray-300 px-2">
+          <option value="manager">Менеджер</option><option value="accountant">Бухгалтер</option><option value="owner">Владелец</option>
+        </select>
+        <span className="text-xs text-gray-500">Точки (пусто = вся сеть):</span>
+        {pts.map((p) => (
+          <label key={p.tradePointId} className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={nu.scope.includes(p.tradePointId)} onChange={(e) => setNu({ ...nu, scope: e.target.checked ? [...nu.scope, p.tradePointId] : nu.scope.filter((x) => x !== p.tradePointId) })} />
+            {p.name}
+          </label>
+        ))}
+        <button onClick={create} className="h-9 px-4 rounded bg-violet-600 text-white text-sm">Создать</button>
+      </div>
+      {msg && <div className="text-sm text-gray-600 mt-2">{msg}</div>}
+    </div>
+  )
+}
+
+// C4: ассортимент активной точки — какие блюда сети продаются на ней (вкл/выкл, point_dish).
+function ServerAssortment() {
+  const [rows, setRows] = useState<AssortmentDish[] | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (open && !rows) getAssortment().then((r) => setRows(r)) }, [open, rows])
+  const toggle = async (d: AssortmentDish) => {
+    setRows((rs) => rs?.map((x) => (x.id === d.id ? { ...x, active: !x.active } : x)) ?? rs)
+    await setAssortment(d.id, !d.active)
+  }
+  return (
+    <div className="mb-5 rounded-md border border-amber-300 bg-amber-50/50 p-3">
+      <button onClick={() => setOpen((v) => !v)} className="text-xs font-semibold text-amber-800">
+        {open ? '▾' : '▸'} Ассортимент точки (С СЕРВЕРА) · какие блюда сети продаются на выбранной ТП (point_dish)
+      </button>
+      {open && rows && (
+        <div className="grid grid-cols-3 gap-x-4 gap-y-1 mt-2">
+          {rows.map((d) => (
+            <label key={d.id} className="flex items-center gap-2 text-sm text-gray-700 bg-white rounded border border-gray-200 px-2 py-1">
+              <input type="checkbox" checked={d.active} onChange={() => toggle(d)} />
+              <span className={d.active ? '' : 'text-gray-400 line-through'}>{d.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      {open && !rows && <div className="text-xs text-gray-400 mt-2">загрузка…</div>}
+    </div>
+  )
+}
+
+// Переключатель активной точки (шапка офиса) — меняет ТП для серверных вызовов с pointId.
+function PointSwitcher() {
+  const [pts, setPts] = useState<{ id: string; name: string; tradePointId: string }[]>([])
+  useEffect(() => {
+    let on = true, tries = 0
+    const tick = () => getStructure().then((t) => {
+      if (!on) return
+      if (t && t.length) setPts(t.flatMap((l) => l.divisions.flatMap((d) => d.points)))
+      else if (tries++ < 10) setTimeout(tick, 600) // ждём авто-логин офиса (токен появится)
+    })
+    tick()
+    return () => { on = false }
+  }, [])
+  if (pts.length === 0) return null
+  return (
+    <select value={getTradePoint()} onChange={(e) => { setActivePoint(e.target.value); window.location.reload() }}
+      className="h-9 rounded border border-gray-300 px-2 text-sm bg-white" title="Активная точка (ТП) для отчётов/цен/склада">
+      {pts.map((p) => <option key={p.tradePointId} value={p.tradePointId}>🏬 {p.name}</option>)}
+    </select>
+  )
+}

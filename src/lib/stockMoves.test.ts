@@ -59,6 +59,20 @@ describe('buildStockMoves — расход по продажам через ре
   })
 })
 
+describe('buildStockMoves — перемещение даёт две ноги (расход+приход), итог по ингредиенту 0', () => {
+  it('5 кг Основной → Бар: out из источника, in в приёмник', () => {
+    const documents: StoreDoc[] = [{ id: 3, type: 'Внутреннее перемещение', at: '14.06.2026, 15:00', by: 'Петров', store: 'Основной склад', toStore: 'Бар', lines: [{ ingredientId: 'i-cola', name: 'cola', unit: 'шт', qty: 5 }] }]
+    const moves = buildStockMoves({ invoices: [], documents, closedOrders: [], ingredients: [ing('i-cola', 60, 350)] })
+    expect(moves).toHaveLength(2)
+    const out = moves.find((m) => m.outQty > 0)!
+    const inc = moves.find((m) => m.inQty > 0)!
+    expect(out.store).toBe('Основной склад'); expect(out.outQty).toBe(5)
+    expect(inc.store).toBe('Бар'); expect(inc.inQty).toBe(5)
+    // сумма по ингредиенту: in − out == 0 → итог не меняется
+    expect(moves.reduce((s, m) => s + m.inQty - m.outQty, 0)).toBe(0)
+  })
+})
+
 describe('ingredientLedger — накопительный остаток по операциям', () => {
   it('приход и расход дают корректный running-баланс', () => {
     const ingredients = [ing('i-cola', 60, 350)]

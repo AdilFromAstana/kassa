@@ -12,11 +12,16 @@ import { initialBanquets, messages as messagesSeed, contractors as contractorsSe
   paymentTypes as paymentTypesSeed, cashOpTypeSeed, writeoffReasonSeed, discountSeed, clubCardSeed, motivationSeed, orderTypesSeed,
   loyaltyProgramSeed, loyaltyCardsSeed, promoActionsSeed, depositProgramSeed, certificatesSeed, invoicesSeed, licensesSeed, licenseClientIdSeed, printTemplatesSeed, inputDevicesSeed,
   deliverySettingsSeed, couriersSeed, deliveryCustomersSeed, deliveryOrdersSeed,
-  corpSettingsSeed, corpTreeSeed, conceptsSeed, docNumberingSeed, syncMonitorSeed } from '../mock/data'
+  corpSettingsSeed, corpTreeSeed, conceptsSeed, docNumberingSeed, syncMonitorSeed, warehouses } from '../mock/data'
 import { POSITION_RIGHTS, hasRightIn } from '../lib/rights'
 import { welcomeBonusOf } from '../lib/loyalty'
 import { todayISO } from '../lib/date'
 import { repo } from '../api' // слой данных (localStorage сейчас → бэкенд позже без изменений UI)
+import { cashMovement, checkout, setPrice, shiftOpen, shiftClose, createStaff, refund as refundApi } from '../api/domain' // доменные вызовы бэка (dual-write при входе в бэк)
+import { putRoleRights, putTechcards, putCategoryPrices, putPayProfiles, putMedChecks, putShiftSchedule, putSetting, putLoyaltyProgram, putDepositProgram, putEstablishment } from '../api/domain' // dual-write карт/синглтонов (волна 1)
+import { syncPaymentTypes, syncOrderTypes, syncCashOpTypes, syncWriteoffReasons, syncShiftTypes, syncDiscounts, syncClubCards, syncCertificates, syncPromoActions, syncMotivation, syncContractors, syncPriceCategories, syncLoyaltyCards, syncLicenses, syncPrintTemplates, syncInputDevices, syncCouriers, syncDeliveryCustomers, putDeliverySettings } from '../api/domain' // dual-write справочников-списков (волна 2)
+import { postBanquet, postMessage, postSalaryPayout, postDeduction, postStoreDoc, postPriceOrder, activatePriceOrder as activatePriceOrderApi } from '../api/domain' // dual-write рантайма/приказов (волна 3)
+import { postStop, delStop, clearStopsApi } from '../api/domain' // dual-write стоп-листа (ключ dishId/optionId)
 
 // Стоп-лист: блюдо недоступно, если полный стоп (remaining undefined) или остаток исчерпан (≤0).
 // Позиция с remaining>0 — ограниченный остаток: продаётся, остаток тает, при 0 уходит в полный стоп.
@@ -39,7 +44,8 @@ const applyStopDecrement = (stopList: StopItem[], lines: OrderLine[]): StopItem[
       ? { ...s, remaining: Math.max(0, +(s.remaining - sold[s.dishId]).toFixed(3)) }
       : s)
 }
-import { baseIngredients, applyWriteoff, applyRestock } from '../mock/warehouse'
+import { baseIngredients, consumptionDelta } from '../mock/warehouse'
+import { type StoreStock, initFromIngredients, totalsMap, applyDelta, transfer as transferSS } from '../lib/storeStock'
 import { buildDemo } from '../mock/demo'
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -54,6 +60,7 @@ const DEFAULT_ESTABLISHMENT: Establishment = {
   precheck: true, comments: true, courses: true, tab: false, mix: false,
   kitchenScreen: true, banquets: true, delivery: true, iikoCard: true, fiscalBeforePay: false, frCount: 1,
   serviceCharge: { active: false, percent: 10 },
+  waiterCommissionPct: 3,
 }
 function loadEstablishment(): Establishment {
   try {
@@ -80,6 +87,7 @@ function loadCategoryPrices(): Record<string, Record<string, number>> {
 }
 function persistCategoryPrices(m: Record<string, Record<string, number>>) {
   void repo.saveConfig('iiko-category-prices', m)
+  void putCategoryPrices(m) // dual-write на бэк (карта точки; no-op без офис-входа)
 }
 
 // Оверрайды техкарт из офиса (dishId → закладка). Касса списывает по ним.
@@ -137,6 +145,7 @@ function loadPaymentTypes(): PaymentType[] {
 }
 function persistPaymentTypes(list: PaymentType[]) {
   void repo.saveConfig('iiko-payment-types', list)
+  void syncPaymentTypes(list)
 }
 function loadOrderTypes(): OrderTypeDef[] {
   try { const raw = localStorage.getItem('iiko-order-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -144,6 +153,7 @@ function loadOrderTypes(): OrderTypeDef[] {
 }
 function persistOrderTypes(list: OrderTypeDef[]) {
   void repo.saveConfig('iiko-order-types', list)
+  void syncOrderTypes(list)
 }
 // Сотрудники доп. (Phase 5): типы смен (расписание) + медкнижки (сроки).
 type ShiftType = { id: string; name: string; from: string; to: string }
@@ -151,76 +161,88 @@ function loadShiftTypes(): ShiftType[] {
   try { const raw = localStorage.getItem('iiko-shift-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return [{ id: 'sh-day', name: 'Дневная', from: '09:00', to: '18:00' }, { id: 'sh-eve', name: 'Вечерняя', from: '14:00', to: '23:00' }]
 }
-function persistShiftTypes(list: ShiftType[]) { void repo.saveConfig('iiko-shift-types', list) }
+function persistShiftTypes(list: ShiftType[]) { void repo.saveConfig('iiko-shift-types', list); void syncShiftTypes(list) }
 // Расписание смен (06): staffId → дата(ISO) → id типа смены.
 function loadShiftSchedule(): Record<string, Record<string, string>> {
   try { const raw = localStorage.getItem('iiko-shift-schedule'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistShiftSchedule(m: Record<string, Record<string, string>>) { void repo.saveConfig('iiko-shift-schedule', m) }
+function persistShiftSchedule(m: Record<string, Record<string, string>>) { void repo.saveConfig('iiko-shift-schedule', m); void putShiftSchedule(m) }
 // Быстрое меню (05): оверрайд страницы группы на кассе (groupId → page).
 function loadQuickMenu(): Record<string, number> {
   try { const raw = localStorage.getItem('iiko-quick-menu'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistQuickMenu(m: Record<string, number>) { void repo.saveConfig('iiko-quick-menu', m) }
+function persistQuickMenu(m: Record<string, number>) { void repo.saveConfig('iiko-quick-menu', m); void putSetting('iiko-quick-menu', m) }
 // План-факт на месяц (07): план по выручке и числу чеков (вводит пользователь).
 function loadMonthPlan(): { revenue: number; checks: number } {
   try { const raw = localStorage.getItem('iiko-plan-fact'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return { revenue: 0, checks: 0 }
 }
-function persistMonthPlan(p: { revenue: number; checks: number }) { void repo.saveConfig('iiko-plan-fact', p) }
+function persistMonthPlan(p: { revenue: number; checks: number }) { void repo.saveConfig('iiko-plan-fact', p); void putSetting('iiko-plan-fact', p) }
 function loadMedChecks(): Record<string, string> {
   try { const raw = localStorage.getItem('iiko-med-checks'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistMedChecks(m: Record<string, string>) { void repo.saveConfig('iiko-med-checks', m) }
+function persistMedChecks(m: Record<string, string>) { void repo.saveConfig('iiko-med-checks', m); void putMedChecks(m) }
 // Профиль оплаты сотрудника (Зарплата): тип (оклад/повременная), оклад ₸, ставка ₸/ч. Касса читает те же значения.
 type PayProfile = { mode?: 'salary' | 'hourly'; oklad?: number; rate?: number }
 function loadPayProfiles(): Record<string, PayProfile> {
   try { const raw = localStorage.getItem('iiko-pay-profiles'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return {}
 }
-function persistPayProfiles(m: Record<string, PayProfile>) { void repo.saveConfig('iiko-pay-profiles', m) }
+function persistPayProfiles(m: Record<string, PayProfile>) { void repo.saveConfig('iiko-pay-profiles', m); void putPayProfiles(m) }
 // iikoCard — бонусная программа + карты гостей (модуль 15).
 function loadLoyaltyProgram(): LoyaltyProgram {
   try { const raw = localStorage.getItem('iiko-loyalty-program'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return { ...loyaltyProgramSeed }
 }
-function persistLoyaltyProgram(p: LoyaltyProgram) { void repo.saveConfig('iiko-loyalty-program', p) }
+function persistLoyaltyProgram(p: LoyaltyProgram) { void repo.saveConfig('iiko-loyalty-program', p); void putLoyaltyProgram(p) }
 function loadLoyaltyCards(): LoyaltyCard[] {
   try { const raw = localStorage.getItem('iiko-loyalty-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return loyaltyCardsSeed.map((c) => ({ ...c }))
 }
-function persistLoyaltyCards(list: LoyaltyCard[]) { void repo.saveConfig('iiko-loyalty-cards', list) }
+function persistLoyaltyCards(list: LoyaltyCard[]) { void repo.saveConfig('iiko-loyalty-cards', list); void syncLoyaltyCards(list) }
 // iikoCard: конструктор акций (бонусная программа), депозитная программа, сертификаты.
 function loadPromoActions(): PromoAction[] {
   try { const raw = localStorage.getItem('iiko-promo-actions'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return promoActionsSeed.map((a) => ({ ...a }))
 }
-function persistPromoActions(list: PromoAction[]) { void repo.saveConfig('iiko-promo-actions', list) }
+function persistPromoActions(list: PromoAction[]) { void repo.saveConfig('iiko-promo-actions', list); void syncPromoActions(list) }
 function loadDepositProgram(): DepositProgram {
   try { const raw = localStorage.getItem('iiko-deposit-program'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return { ...depositProgramSeed }
 }
-function persistDepositProgram(p: DepositProgram) { void repo.saveConfig('iiko-deposit-program', p) }
+function persistDepositProgram(p: DepositProgram) { void repo.saveConfig('iiko-deposit-program', p); void putDepositProgram(p) }
 function loadCertificates(): Certificate[] {
   try { const raw = localStorage.getItem('iiko-certificates'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return certificatesSeed.map((c) => ({ ...c }))
 }
-function persistCertificates(list: Certificate[]) { void repo.saveConfig('iiko-certificates', list) }
+function persistCertificates(list: Certificate[]) { void repo.saveConfig('iiko-certificates', list); void syncCertificates(list) }
 // Администрирование (модуль 12): лицензии, печатные формы, устройства ввода.
 function loadAdmin<T>(key: string, seed: T): T {
   try { const raw = localStorage.getItem(key); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return seed
 }
-function persistAdmin(key: string, val: unknown) { void repo.saveConfig(key, val) }
+function persistAdmin(key: string, val: unknown) {
+  void repo.saveConfig(key, val)
+  // dual-write точечных справочников/синглтонов админ-секции на типизированные эндпоинты (волна 2)
+  switch (key) {
+    case 'iiko-licenses': void syncLicenses(val as { id: string }[]); break
+    case 'iiko-print-templates': void syncPrintTemplates(val as { id: string }[]); break
+    case 'iiko-input-devices': void syncInputDevices(val as { id: string }[]); break
+    case 'iiko-couriers': void syncCouriers(val as { id: string }[]); break
+    case 'iiko-delivery-customers': void syncDeliveryCustomers(val as { id: string }[]); break
+    case 'iiko-delivery-settings': void putDeliverySettings(val); break
+  }
+}
 function loadCashOpTypes(): CashOpType[] {
   try { const raw = localStorage.getItem('iiko-cashop-types'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
   return cashOpTypeSeed.map((c) => ({ ...c }))
 }
 function persistCashOpTypes(list: CashOpType[]) {
   void repo.saveConfig('iiko-cashop-types', list)
+  void syncCashOpTypes(list)
 }
 function loadWriteoffReasons(): string[] {
   try { const raw = localStorage.getItem('iiko-writeoff-reasons'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -228,6 +250,7 @@ function loadWriteoffReasons(): string[] {
 }
 function persistWriteoffReasons(list: string[]) {
   void repo.saveConfig('iiko-writeoff-reasons', list)
+  void syncWriteoffReasons(list)
 }
 // Дисконтная система (раздел 10): скидки/надбавки + клубные карты.
 function loadDiscounts(): Discount[] {
@@ -236,6 +259,7 @@ function loadDiscounts(): Discount[] {
 }
 function persistDiscounts(list: Discount[]) {
   void repo.saveConfig('iiko-discounts', list)
+  void syncDiscounts(list)
 }
 function loadClubCards(): ClubCard[] {
   try { const raw = localStorage.getItem('iiko-club-cards'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -243,6 +267,7 @@ function loadClubCards(): ClubCard[] {
 }
 function persistClubCards(list: ClubCard[]) {
   void repo.saveConfig('iiko-club-cards', list)
+  void syncClubCards(list)
 }
 // Мотивационные программы + удержания (раздел 06).
 function loadMotivation(): MotivationProgram[] {
@@ -251,6 +276,7 @@ function loadMotivation(): MotivationProgram[] {
 }
 function persistMotivation(list: MotivationProgram[]) {
   void repo.saveConfig('iiko-motivation', list)
+  void syncMotivation(list)
 }
 function loadDeductions(): SalaryDeduction[] {
   try { const raw = localStorage.getItem('iiko-deductions'); if (raw) return JSON.parse(raw) } catch { /* ignore */ }
@@ -303,6 +329,31 @@ function persistIngredients(ings: Ingredient[]) {
   void repo.saveConfig('iiko-stock', map)
 }
 
+// ─── Остатки по складам (единый источник; Ingredient.stock = производная сумма). TRANSFER_PLAN.md ───
+const DEFAULT_STORE = warehouses[0] // единый источник имён складов (mock/data)
+const homeStore = (i?: Ingredient) => i?.store ?? DEFAULT_STORE
+function loadStoreStock(): StoreStock {
+  try { const raw = localStorage.getItem('iiko-store-stock'); if (raw) return JSON.parse(raw) as StoreStock } catch { /* ignore */ }
+  return initFromIngredients(loadIngredients(), DEFAULT_STORE) // миграция: весь остаток на домашний склад
+}
+function persistStoreStock(ss: StoreStock) { void repo.saveConfig('iiko-store-stock', ss) }
+// применить новое распределение по складам → пересчитать кэш итогов Ingredient.stock + персист обоих
+function commitStock(ings: Ingredient[], ss: StoreStock): { storeStock: StoreStock; ingredients: Ingredient[] } {
+  const totals = totalsMap(ss)
+  const ingredients = ings.map((i) => (i.id in totals ? { ...i, stock: totals[i.id] } : i))
+  persistStoreStock(ss); persistIngredients(ingredients)
+  return { storeStock: ss, ingredients }
+}
+// списать (−1) / вернуть (+1) по дельте потребления (блюдо+модификаторы) с домашнего склада ингредиента
+function moveByConsumption(ings: Ingredient[], ss: StoreStock, delta: Record<string, number>, sign: 1 | -1): StoreStock {
+  let next = ss
+  for (const [id, qty] of Object.entries(delta)) {
+    if (!qty) continue
+    next = applyDelta(next, id, homeStore(ings.find((i) => i.id === id)), sign * qty)
+  }
+  return next
+}
+
 // Авто-наполнение демо-данными при запуске (для показа заказчику без бэка). По умолчанию ВКЛ —
 // чтобы все экраны были «живыми»; выключается явно (Доп. → демо-режим, флаг '0' в localStorage).
 function loadDemoAuto(): boolean {
@@ -353,7 +404,8 @@ interface PosState {
   banquets: Banquet[]
   closedShifts: ClosedShift[] // архив закрытых кассовых смен
   stopList: StopItem[] // стоп-лист: dishId + остаток порций + кто/когда внёс
-  ingredients: Ingredient[] // склад: товары-ингредиенты с остатками (списываются по техкарте при продаже)
+  ingredients: Ingredient[] // склад: товары-ингредиенты; .stock = ИТОГ по складам (производная от storeStock)
+  storeStock: StoreStock // единый источник: ingredientId → склад → остаток (перемещения, per-store)
   establishment: Establishment // профиль заведения (режим + фичи), управляет видимостью кнопок
   priceOverrides: Record<string, number> // цены меню из офиса (dishId → ₸)
   priceCategories: { id: string; name: string }[] // ценовые категории (Прейскурант): базовая/VIP/персонал…
@@ -490,8 +542,8 @@ interface PosState {
   removePosting: (id: string) => void
   precheck: () => void
   fiscalizeOrder: () => void // фискальный чек до оплаты (9.x): печать ФД, заказ → стадия оплаты, стол не закрыт
-  pay: (payments: PaymentSplit[], received: number) => ClosedOrder | null
-  payByGuest: (guestNo: number, payments: PaymentSplit[], received: number) => ClosedOrder | null
+  pay: (payments: PaymentSplit[], received: number) => Promise<ClosedOrder | null>
+  payByGuest: (guestNo: number, payments: PaymentSplit[], received: number) => Promise<ClosedOrder | null>
 
   // деньги, возвраты, перенос, банкеты
   addCashMovement: (kind: 'in' | 'out', type: string, amount: number, comment: string) => void
@@ -616,6 +668,7 @@ export const usePos = create<PosState>((set, get) => ({
   closedShifts: DEMO_INIT?.closedShifts ?? [],
   stopList: [],
   ingredients: loadIngredients(),
+  storeStock: loadStoreStock(),
   establishment: loadEstablishment(),
   priceOverrides: loadPriceOverrides(),
   priceCategories: loadPriceCategories(),
@@ -696,6 +749,7 @@ export const usePos = create<PosState>((set, get) => ({
 
   openCashShift: (openingCash = 0) => {
     const u = get().user
+    void shiftOpen(openingCash) // dual-write открытия смены на бэк (no-op без входа)
     set((st) => ({
       cashShift: { no: st.cashShiftSeq, openedAt: fullNow(), openedBy: u?.name ?? '', openingCash },
       // начальный остаток (разменный фонд) — внесение наличных в ящик на старте смены
@@ -705,7 +759,8 @@ export const usePos = create<PosState>((set, get) => ({
       movementSeq: openingCash > 0 ? st.movementSeq + 1 : st.movementSeq,
     }))
   },
-  closeCashShift: () =>
+  closeCashShift: () => {
+    void shiftClose() // dual-write закрытия смены на бэк (архивирует closed_shift)
     set((st) => {
       const archived: ClosedShift | null = st.cashShift
         ? {
@@ -726,7 +781,8 @@ export const usePos = create<PosState>((set, get) => ({
         refunds: [],
         // незакрытые заказы переносятся (в моке просто остаются)
       }
-    }),
+    })
+  },
 
   startOrder: ({ tableId, hallId, guests, type = 'dinein' }) => {
     const id = get().orderSeq + 1
@@ -1066,53 +1122,58 @@ export const usePos = create<PosState>((set, get) => ({
     orders: st.orders.map((o) => (o.id === st.currentOrderId ? { ...o, status: 'fiscalized' } : o)),
   })),
 
-  pay: (payments, received) => {
+  pay: async (payments, received) => {
     const o = get().currentOrder()
     if (!o) return null
-    const total = orderTotal(o)
-    const paid = payments.reduce((s, p) => s + p.amount, 0)
-    const change = Math.max(0, received - total)
-    const fiscalDocNo = String(get().fiscalSeq + 1)
+    const localTotal = orderTotal(o)
+    // Server-authoritative: чек оформляет сервер (фискал+итог+сдача+списание). Фолбэк на локальное, если бэк недоступен.
+    const srv = await checkout(o, payments, received) as { total?: number; change?: number; fiscalDocNo?: string } | null
+    const total = srv?.total ?? localTotal
+    const change = srv?.change ?? Math.max(0, received - localTotal)
+    const fiscalDocNo = srv?.fiscalDocNo ?? String(get().fiscalSeq + 1)
     const closed: ClosedOrder = {
       ...o, status: 'paid', paidAt: fullNow(), payments, change, total, fiscalDocNo,
     }
     set((st) => {
-      // списание ингредиентов по техкарте (аналог Акта реализации iiko)
-      const ingredients = applyWriteoff(st.ingredients, o.lines, st.techCardOverrides)
-      persistIngredients(ingredients)
+      // списание ингредиентов по техкарте (аналог Акта реализации iiko) — с домашнего склада
+      const ss = moveByConsumption(st.ingredients, st.storeStock, consumptionDelta(o.lines, st.techCardOverrides), -1)
+      const committed = commitStock(st.ingredients, ss)
       return {
         closedOrders: [closed, ...st.closedOrders],
         orders: st.orders.filter((x) => x.id !== o.id),
         currentOrderId: null,
         fiscalSeq: st.fiscalSeq + 1,
-        ingredients,
+        ...committed,
         stopList: applyStopDecrement(st.stopList, o.lines), // уменьшить остаток стоп-листа
       }
     })
     return closed
   },
 
-  payByGuest: (guestNo, payments, received) => {
+  payByGuest: async (guestNo, payments, received) => {
     const o = get().currentOrder()
     if (!o) return null
     const mine = o.lines.filter((l) => l.guestNo === guestNo)
     if (mine.length === 0) return null
     const rest = o.lines.filter((l) => l.guestNo !== guestNo)
     const sub = mine.reduce((s, l) => s + lineTotal(l), 0)
-    const total = +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100) * (1 + (o.serviceChargePct ?? 0) / 100)).toFixed(2)
-    const change = Math.max(0, received - total)
-    const fiscalDocNo = String(get().fiscalSeq + 1)
+    const localTotal = +(sub * (1 - o.discountPct / 100) * (1 + o.surchargePct / 100) * (1 + (o.serviceChargePct ?? 0) / 100)).toFixed(2)
+    // Server-authoritative: чек на позиции гостя оформляет сервер (подзаказ = только mine). Фолбэк локальный.
+    const srv = await checkout({ ...o, lines: mine }, payments, received) as { total?: number; change?: number; fiscalDocNo?: string } | null
+    const total = srv?.total ?? localTotal
+    const change = srv?.change ?? Math.max(0, received - localTotal)
+    const fiscalDocNo = srv?.fiscalDocNo ?? String(get().fiscalSeq + 1)
     const closed: ClosedOrder = {
       ...o, lines: mine, status: 'paid', paidAt: fullNow(), payments, change, total, fiscalDocNo,
     }
     set((st) => {
-      // списываем только оплаченные позиции гостя
-      const ingredients = applyWriteoff(st.ingredients, mine, st.techCardOverrides)
-      persistIngredients(ingredients)
+      // списываем только оплаченные позиции гостя — с домашнего склада
+      const ss = moveByConsumption(st.ingredients, st.storeStock, consumptionDelta(mine, st.techCardOverrides), -1)
+      const committed = commitStock(st.ingredients, ss)
       return {
         closedOrders: [closed, ...st.closedOrders],
         fiscalSeq: st.fiscalSeq + 1,
-        ingredients,
+        ...committed,
         stopList: applyStopDecrement(st.stopList, mine), // уменьшить остаток стоп-листа
 
         // оставшиеся гости — в заказе; если никого не осталось, заказ закрыт
@@ -1125,14 +1186,16 @@ export const usePos = create<PosState>((set, get) => ({
     return closed
   },
 
-  addCashMovement: (kind, type, amount, comment) =>
+  addCashMovement: (kind, type, amount, comment) => {
+    void cashMovement(kind, type, amount, comment) // dual-write на бэк (no-op без входа)
     set((st) => ({
       cashMovements: [
         { id: st.movementSeq + 1, kind, type, amount, comment, at: fullNow() },
         ...st.cashMovements,
       ],
       movementSeq: st.movementSeq + 1,
-    })),
+    }))
+  },
 
   refundOrder: (receiptNo, sel, opts) => {
     let closed = get().closedOrders.find((o) => o.fiscalDocNo === receiptNo)
@@ -1156,6 +1219,7 @@ export const usePos = create<PosState>((set, get) => ({
     }
     const uids = Object.keys(qtyByUid)
     if (uids.length === 0) return null
+    void refundApi(receiptNo, full, uids, opts.reason, opts.restock, opts.method) // dual-write возврата на бэк (полный — по receiptNo; no-op без входа)
     // строки возврата, масштабированные на возвращаемое количество (для суммы и возврата на склад)
     const returnedLines = uids.map((uid) => { const l = co.lines.find((x) => x.uid === uid)!; return { ...l, qty: qtyByUid[uid] } })
     const amount = full
@@ -1170,16 +1234,16 @@ export const usePos = create<PosState>((set, get) => ({
       at: fullNow(), by: opts.by,
     }
     set((st) => {
-      // «со списанием на склад» — возвращаем ингредиенты возвращённых позиций в остаток
-      const ingredients = opts.restock ? applyRestock(st.ingredients, returnedLines, st.techCardOverrides) : st.ingredients
-      if (opts.restock) persistIngredients(ingredients)
+      // «со списанием на склад» — возвращаем ингредиенты возвращённых позиций на домашний склад
+      const ss = opts.restock ? moveByConsumption(st.ingredients, st.storeStock, consumptionDelta(returnedLines, st.techCardOverrides), 1) : st.storeStock
+      const committed = commitStock(st.ingredients, ss)
       // в моке уменьшаем сумму чека на возвращённое (полный возврат → 0) — и в текущих, и в архиве
       const upd = (o: ClosedOrder) => o.fiscalDocNo === receiptNo ? { ...o, total: full ? 0 : +(o.total - amount).toFixed(2) } : o
       return {
         refunds: [refund, ...st.refunds],
         refundSeq: st.refundSeq + 1,
         fiscalSeq: st.fiscalSeq + 1,
-        ingredients,
+        ...committed,
         closedOrders: st.closedOrders.map(upd),
         closedShifts: st.closedShifts.map((sh) => ({ ...sh, orders: sh.orders.map(upd) })),
       }
@@ -1219,32 +1283,47 @@ export const usePos = create<PosState>((set, get) => ({
     })),
 
   addBanquet: (b) =>
-    set((st) => ({
-      banquets: [{ ...b, id: st.banquetSeq + 1, status: 'Действует' }, ...st.banquets],
-      banquetSeq: st.banquetSeq + 1,
-    })),
+    set((st) => {
+      const banquet: Banquet = { ...b, id: st.banquetSeq + 1, status: 'Действует' }
+      void postBanquet(banquet) // dual-write банкета на бэк (рантайм точки)
+      return { banquets: [banquet, ...st.banquets], banquetSeq: st.banquetSeq + 1 }
+    }),
 
   updateBanquet: (id, patch) =>
-    set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, ...patch } : b)) })),
+    set((st) => {
+      const banquets = st.banquets.map((b) => (b.id === id ? { ...b, ...patch } : b))
+      const upd = banquets.find((b) => b.id === id); if (upd) void postBanquet(upd) // upsert
+      return { banquets }
+    }),
 
   setBanquetStatus: (id, status) =>
-    set((st) => ({ banquets: st.banquets.map((b) => (b.id === id ? { ...b, status } : b)) })),
+    set((st) => {
+      const banquets = st.banquets.map((b) => (b.id === id ? { ...b, status } : b))
+      const upd = banquets.find((b) => b.id === id); if (upd) void postBanquet(upd) // upsert
+      return { banquets }
+    }),
 
   addStop: (dishId, remaining, scope) =>
-    set((st) => (st.stopList.some((s) => s.dishId === dishId)
-      ? st
-      : { stopList: [...st.stopList, { dishId, remaining, scope, byName: st.user?.name ?? '—', at: fullNow() }] })),
+    set((st) => {
+      if (st.stopList.some((s) => s.dishId === dishId)) return st
+      const item = { dishId, remaining, scope, byName: st.user?.name ?? '—', at: fullNow() }
+      void postStop(item) // dual-write стопа блюда (upsert по dishId)
+      return { stopList: [...st.stopList, item] }
+    }),
   removeStop: (dishId) =>
-    set((st) => ({ stopList: st.stopList.filter((s) => s.dishId !== dishId) })),
+    set((st) => { void delStop({ dishId }); return { stopList: st.stopList.filter((s) => s.dishId !== dishId) } }),
   setStopRemaining: (dishId, remaining) =>
-    set((st) => ({ stopList: st.stopList.map((s) => (s.dishId === dishId && !s.optionId ? { ...s, remaining } : s)) })),
+    set((st) => { void postStop({ dishId, remaining }); return { stopList: st.stopList.map((s) => (s.dishId === dishId && !s.optionId ? { ...s, remaining } : s)) } }),
   addStopOption: (optionId, name) =>
-    set((st) => (st.stopList.some((s) => s.optionId === optionId)
-      ? st
-      : { stopList: [...st.stopList, { dishId: '', optionId, name, byName: st.user?.name ?? '—', at: fullNow() }] })),
+    set((st) => {
+      if (st.stopList.some((s) => s.optionId === optionId)) return st
+      const item = { dishId: '', optionId, name, byName: st.user?.name ?? '—', at: fullNow() }
+      void postStop(item) // dual-write стопа опции (upsert по optionId)
+      return { stopList: [...st.stopList, item] }
+    }),
   removeStopOption: (optionId) =>
-    set((st) => ({ stopList: st.stopList.filter((s) => s.optionId !== optionId) })),
-  clearStops: () => set({ stopList: [] }),
+    set((st) => { void delStop({ optionId }); return { stopList: st.stopList.filter((s) => s.optionId !== optionId) } }),
+  clearStops: () => { void clearStopsApi(); set({ stopList: [] }) },
   can: (code) => hasRightIn(get().roleRights, get().user?.positions, code),
   cashInDrawer: () => {
     const st = get()
@@ -1260,6 +1339,7 @@ export const usePos = create<PosState>((set, get) => ({
   replyMessage: (toTitle, text) => set((st) => {
     const id = st.messages.reduce((mx, m) => Math.max(mx, m.id), 0) + 1
     const reply: Message = { id, from: st.user?.name ?? 'Сотрудник', date: fullNow(), title: `Re: ${toTitle}`, body: text, unread: false, outgoing: true }
+    void postMessage(reply) // dual-write сообщения на бэк
     return { messages: [reply, ...st.messages] }
   }),
 
@@ -1267,6 +1347,7 @@ export const usePos = create<PosState>((set, get) => ({
     if (!name || !bin || st.contractors.some((c) => c.bin === bin)) return st
     const contractors = [...st.contractors, { id: 'c-' + bin, name, bin }]
     void repo.saveConfig('iiko-contractors', contractors)
+    void syncContractors(contractors)
     return { contractors }
   }),
   // Приходная накладная (KZ): создаёт входящую ЭСФ + приходует ингредиенты на склад.
@@ -1282,11 +1363,12 @@ export const usePos = create<PosState>((set, get) => ({
       esfNo: header?.esfNo?.trim() || `ESF-KZ-${100000 + n}`, kind: 'in', store: header?.store,
     }
     set((st) => {
-      const ingredients = st.ingredients.map((i) => { const l = lines.find((x) => x.ingredientId === i.id); return l ? { ...i, stock: +(i.stock + l.qty).toFixed(3) } : i })
-      persistIngredients(ingredients)
+      let ss = st.storeStock
+      for (const l of lines) ss = applyDelta(ss, l.ingredientId, header?.store ?? homeStore(st.ingredients.find((i) => i.id === l.ingredientId)), l.qty)
+      const committed = commitStock(st.ingredients, ss)
       const invoices = [inv, ...st.invoices]
       void repo.saveConfig('iiko-invoices', invoices)
-      return { invoices, invSeq: n, ingredients }
+      return { invoices, invSeq: n, ...committed }
     })
     return inv
   },
@@ -1314,6 +1396,7 @@ export const usePos = create<PosState>((set, get) => ({
     const nextList = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code]
     const next = { ...st.roleRights, [position]: nextList }
     void repo.saveConfig('iiko-role-rights', next)
+    void putRoleRights(next) // dual-write карты прав на бэк
     return { roleRights: next }
   }),
 
@@ -1321,17 +1404,23 @@ export const usePos = create<PosState>((set, get) => ({
   createStoreDoc: (type, lines, opts) => {
     const doc: StoreDoc = {
       id: get().docSeq + 1, type, at: fullNow(), by: get().user?.name ?? '—',
-      store: opts?.store ?? 'Основной', toStore: opts?.toStore, result: opts?.result, reason: opts?.reason, lines,
+      store: opts?.store ?? DEFAULT_STORE, toStore: opts?.toStore, result: opts?.result, reason: opts?.reason, lines,
     }
+    void postStoreDoc(doc) // dual-write складского документа (со строками)
     set((st) => {
-      const ingredients = st.ingredients.map((i) => {
-        const l = lines.find((x) => x.ingredientId === i.id)
-        if (!l) return i
-        const stock = type === 'Инвентаризация' ? l.qty : +(i.stock - l.qty).toFixed(3)
-        return { ...i, stock }
-      })
-      persistIngredients(ingredients)
-      return { documents: [doc, ...st.documents], docSeq: st.docSeq + 1, ingredients }
+      const src = opts?.store ?? DEFAULT_STORE
+      let ss = st.storeStock
+      if (type === 'Инвентаризация') {
+        // выставить факт на выбранном складе (остальные склады не трогаем)
+        for (const l of lines) ss = { ...ss, [l.ingredientId]: { ...(ss[l.ingredientId] ?? {}), [src]: +l.qty.toFixed(3) } }
+      } else if (type === 'Внутреннее перемещение') {
+        const dst = opts?.toStore ?? DEFAULT_STORE
+        for (const l of lines) { const r = transferSS(ss, l.ingredientId, src, dst, l.qty); if (r.ok) ss = r.ss }
+      } else {
+        for (const l of lines) ss = applyDelta(ss, l.ingredientId, src, -l.qty) // расход (списание/расходная/возврат поставщику)
+      }
+      const committed = commitStock(st.ingredients, ss)
+      return { documents: [doc, ...st.documents], docSeq: st.docSeq + 1, ...committed }
     })
     return doc
   },
@@ -1339,6 +1428,7 @@ export const usePos = create<PosState>((set, get) => ({
   setEstablishment: (patch) => set((st) => {
     const next = { ...st.establishment, ...patch }
     void repo.saveConfig('iiko-establishment', next)
+    void putEstablishment(next) // dual-write настроек заведения (точка)
     return { establishment: next }
   }),
   priceOf: (dishId, basePrice) => {
@@ -1349,6 +1439,7 @@ export const usePos = create<PosState>((set, get) => ({
   setDishPrice: (dishId, price) => set((st) => {
     const next = { ...st.priceOverrides, [dishId]: price }
     void repo.saveConfig('iiko-menu-prices', next)
+    void setPrice(dishId, price) // dual-write цены на бэк (price_override точки; no-op без входа)
     return { priceOverrides: next }
   }),
   setCategoryPrice: (catId, dishId, price) => set((st) => {
@@ -1361,6 +1452,7 @@ export const usePos = create<PosState>((set, get) => ({
     const id = 'pc-' + (st.priceCategories.length + 1)
     const list = [...st.priceCategories, { id, name }]
     void repo.saveConfig('iiko-price-categories', list)
+    void syncPriceCategories(list)
     return { priceCategories: list }
   }),
   removePriceCategory: (catId) => set((st) => {
@@ -1368,18 +1460,21 @@ export const usePos = create<PosState>((set, get) => ({
     const list = st.priceCategories.filter((c) => c.id !== catId)
     const cp = { ...st.categoryPrices }; delete cp[catId]
     void repo.saveConfig('iiko-price-categories', list)
+    void syncPriceCategories(list)
     persistCategoryPrices(cp)
     return { priceCategories: list, categoryPrices: cp, activePriceCategory: st.activePriceCategory === catId ? 'base' : st.activePriceCategory }
   }),
   setTechCard: (dishId, items) => set((st) => {
     const next = { ...st.techCardOverrides, [dishId]: items }
     void repo.saveConfig('iiko-techcards', next)
+    void putTechcards(next) // dual-write техкарт на бэк (сеть)
     return { techCardOverrides: next }
   }),
 
   // сотрудники: карточки правятся в офисе, вход на кассе (login) идёт по этому списку
   addStaff: (s) => set((st) => {
     const id = 's-' + (s.name.toLowerCase().replace(/\s+/g, '-') || 'new') + '-' + (st.staffList.length + 1)
+    void createStaff(s.name, s.pin, s.positions, s.card) // dual-write: Employee+назначение на бэк (no-op без офис-входа)
     const list = [...st.staffList, { ...s, id }]
     persistStaff(list)
     return { staffList: list }
@@ -1402,6 +1497,7 @@ export const usePos = create<PosState>((set, get) => ({
     if (lines.length === 0) return null
     const n = get().priceOrderSeq + 1
     const order: PriceOrder = { id: n, no: `ПР-${1000 + n}`, date, note, status: 'draft', lines, createdAt: fullNow() }
+    void postPriceOrder(order) // dual-write приказа (со строками)
     set((st) => {
       const list = [order, ...st.priceOrders]
       persistPriceOrders(list)
@@ -1415,6 +1511,7 @@ export const usePos = create<PosState>((set, get) => ({
     const prices = { ...st.priceOverrides }
     for (const l of order.lines) prices[l.dishId] = l.newPrice
     void repo.saveConfig('iiko-menu-prices', prices)
+    void activatePriceOrderApi(id) // dual-write активации: бэк ставит статус + пишет PriceOverride
     const list = st.priceOrders.map((o) => (o.id === id ? { ...o, status: 'active' as const } : o))
     persistPriceOrders(list)
     return { priceOverrides: prices, priceOrders: list }
@@ -1428,6 +1525,7 @@ export const usePos = create<PosState>((set, get) => ({
     const prices = { ...get().priceOverrides }
     for (const o of ordered) for (const l of o.lines) prices[l.dishId] = l.newPrice
     void repo.saveConfig('iiko-menu-prices', prices)
+    for (const o of ordered) void activatePriceOrderApi(o.id) // dual-write активации каждого «созревшего» приказа
     const dueIds = new Set(ordered.map((o) => o.id))
     const list = get().priceOrders.map((o) => (dueIds.has(o.id) ? { ...o, status: 'active' as const } : o))
     persistPriceOrders(list)
@@ -1444,6 +1542,7 @@ export const usePos = create<PosState>((set, get) => ({
       const payout: SalaryPayout = { id: st.salaryPayoutSeq + 1, staffId, kind, amount, at: fullNow(), by }
       const list = [payout, ...st.salaryPayouts]
       persistSalary(list)
+      void postSalaryPayout(payout) // dual-write выплаты (staffId→employeeId на бэке)
       const name = st.staffList.find((s) => s.id === staffId)?.name ?? ''
       const type = kind === 'advance' ? 'Выдача аванса (зарплата)' : 'Выплата зарплаты'
       return {
@@ -1605,6 +1704,7 @@ export const usePos = create<PosState>((set, get) => ({
     const item = { id: st.deductionSeq + 1, staffId, amount, reason: reason || 'Удержание', at: fullNow() }
     const list = [item, ...st.salaryDeductions]
     persistDeductions(list)
+    void postDeduction(item) // dual-write удержания (staffId→employeeId)
     return { salaryDeductions: list, deductionSeq: st.deductionSeq + 1 }
   }),
   removeDeduction: (id) => set((st) => {
@@ -1614,21 +1714,17 @@ export const usePos = create<PosState>((set, get) => ({
   }),
 
   receiveStock: (ingredientId, qty) => set((st) => {
-    const ingredients = st.ingredients.map((i) =>
-      i.id === ingredientId ? { ...i, stock: +(i.stock + qty).toFixed(3) } : i)
-    persistIngredients(ingredients)
-    return { ingredients }
+    const ss = applyDelta(st.storeStock, ingredientId, homeStore(st.ingredients.find((i) => i.id === ingredientId)), qty)
+    return commitStock(st.ingredients, ss)
   }),
   setIngredientStock: (ingredientId, qty) => set((st) => {
-    const ingredients = st.ingredients.map((i) =>
-      i.id === ingredientId ? { ...i, stock: +qty.toFixed(3) } : i)
-    persistIngredients(ingredients)
-    return { ingredients }
+    // прямой ввод остатка (инвентаризация-факт): на домашний склад, остальные склады обнуляем
+    const ss = { ...st.storeStock, [ingredientId]: { [homeStore(st.ingredients.find((i) => i.id === ingredientId))]: +qty.toFixed(3) } }
+    return commitStock(st.ingredients, ss)
   }),
   resetStock: () => set(() => {
-    const ingredients = baseIngredients.map((i) => ({ ...i }))
-    persistIngredients(ingredients)
-    return { ingredients }
+    const ss = initFromIngredients(baseIngredients, DEFAULT_STORE)
+    return commitStock(baseIngredients.map((i) => ({ ...i })), ss)
   }),
 
   seedDemo: (count = 24) => set((st) => {

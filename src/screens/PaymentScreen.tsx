@@ -34,6 +34,7 @@ export default function PaymentScreen() {
   const [changeFrom, setChangeFrom] = useState('')
   const [prepaid, setPrepaid] = useState(false)
   const [showGoods, setShowGoods] = useState(false) // товарный (нефискальный) чек
+  const [paying, setPaying] = useState(false) // идёт серверная оплата — не уводить на /halls до чека
 
   const est = pos.establishment
   const paymentTypes = pos.paymentTypes
@@ -63,7 +64,10 @@ export default function PaymentScreen() {
   const [certApplied, setCertApplied] = useState<{ id: string; number: string; nominal: number } | null>(null)
   const [certError, setCertError] = useState('')
 
-  if (!order && !receipt) { navigate('/halls'); return null }
+  if (!order && !receipt) {
+    if (paying) return <div className="h-full flex items-center justify-center bg-pos-bg text-white text-lg">Оплата…</div>
+    navigate('/halls'); return null
+  }
 
   // ───────── чек закрыт: фискальный чек (мок Webkassa) ─────────
   if (receipt) {
@@ -183,7 +187,7 @@ export default function PaymentScreen() {
     setActive('p-cert')
   }
 
-  const doPay = () => {
+  const doPay = async () => {
     if (payBlocked) { alert(`Проверьте суммы: бонусы ≤ ${formatTenge(maxBonus)}, депозит ≤ ${formatTenge(maxDeposit)}, сертификат ≤ номинала`); return }
     const tenders = splitsNow()
     // предоплата/депозит идёт отдельной строкой оплаты, чтобы сумма платежей сошлась с итогом
@@ -194,8 +198,10 @@ export default function PaymentScreen() {
     const depositUsed = +(tenders.find((s) => s.paymentTypeId === 'p-deposit')?.amount ?? 0).toFixed(2)
     const certUsed = +(tenders.find((s) => s.paymentTypeId === 'p-cert')?.amount ?? 0).toFixed(2)
     const moneyPaid = +(tenders.filter((s) => s.paymentTypeId !== 'p-bonus').reduce((s, p) => s + p.amount, 0)).toFixed(2)
-    const closed = guestNo != null ? pos.payByGuest(guestNo, splits, paid + prepay) : pos.pay(splits, paid + prepay)
-    if (closed) {
+    setPaying(true) // защита от ухода на /halls, пока заказ удаляется, а чек ещё не отрисован
+    const closed = await (guestNo != null ? pos.payByGuest(guestNo, splits, paid + prepay) : pos.pay(splits, paid + prepay))
+    if (!closed) { setPaying(false); return }
+    {
       if (used.some((p) => p.openDrawer)) printToast('Денежный ящик открыт')
       if (used.some((p) => p.printReceipt)) printToast('Печать товарного чека')
       if (order!.type === 'delivery') printToast(`Доставка${courier ? ` · курьер ${courier}` : ''} · ${prepaid ? 'предоплачено' : 'оплата при получении'}`)

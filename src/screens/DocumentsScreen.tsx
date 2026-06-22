@@ -6,6 +6,7 @@ import Modal from '../components/Modal'
 import { usePos } from '../store/pos'
 import { warehouses } from '../mock/data'
 import { formatTenge } from '../lib/money'
+import { stockAt } from '../lib/storeStock'
 import { printToast } from '../lib/print'
 import type { DocType, DocLine, StoreDoc } from '../types'
 
@@ -15,7 +16,7 @@ const DOC_TYPES: DocType[] = ['Акт списания', 'Акт пригото�
 
 export default function DocumentsScreen() {
   const navigate = useNavigate()
-  const { ingredients, documents, createStoreDoc, writeoffReasons, contractors } = usePos()
+  const { ingredients, storeStock, documents, createStoreDoc, writeoffReasons, contractors, can } = usePos()
   const [supplier, setSupplier] = useState('') // поставщик для возврата
   const REASONS = writeoffReasons // причины списания из офиса (Розничные продажи)
   const [type, setType] = useState<DocType | null>(null)
@@ -55,6 +56,12 @@ export default function DocumentsScreen() {
   const provesti = () => {
     if (!type || lines.length === 0) return
     if (isMake && !(parseFloat(resultQty.replace(',', '.')) > 0)) { alert('Укажите количество результата'); return }
+    if (isTransfer) {
+      if (!can('B_TRN')) { alert('Нет права на перемещение (нужно право B_TRN)'); return }
+      if (store === toStore) { alert('Склад-источник и приёмник совпадают'); return }
+      const bad = lines.find((l) => stockAt(storeStock, l.ingredientId, store) < l.qty)
+      if (bad) { alert(`Недостаточно «${bad.name}» на складе «${store}»: есть ${stockAt(storeStock, bad.ingredientId, store)}, нужно ${bad.qty}`); return }
+    }
     const resIng = ingredients.find((i) => i.id === resultId)
     const opts = {
       ...(isWriteoff ? { reason } : {}),

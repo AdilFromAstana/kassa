@@ -5,6 +5,7 @@ import { usePos, orderTotal } from '../store/pos'
 import { Check, X } from 'lucide-react'
 import { formatTenge } from '../lib/money'
 import { printToast } from '../lib/print'
+import { waiterCommission } from '../lib/salesReports'
 import TopBar from '../components/TopBar'
 
 // Номиналы тенге (банкноты + крупные монеты) для купюрной раскладки контрольного пересчёта.
@@ -13,7 +14,10 @@ const DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20]
 // Мастер закрытия кассовой смены (FRONT_03 §5.3): незакрытые заказы → пересчёт → отчёты → Z-отчёт.
 export default function ShiftCloseScreen() {
   const navigate = useNavigate()
-  const { orders, closedOrders, cashShift, cashMovements, refunds, closeCashShift, forceCloseOrder, addCashMovement } = usePos()
+  const { orders, closedOrders, cashShift, cashMovements, refunds, closeCashShift, forceCloseOrder, addCashMovement, establishment } = usePos()
+  const commRate = establishment.waiterCommissionPct ?? 3
+  const commRows = waiterCommission(closedOrders, commRate)
+  const commTotal = +commRows.reduce((s, r) => s + r.commission, 0).toFixed(2)
   const [step, setStep] = useState(1)
   const [denoms, setDenoms] = useState<Record<number, string>>({})
   const [fundStr, setFundStr] = useState('') // разменный фонд, оставляемый на след. смену
@@ -134,6 +138,32 @@ export default function ShiftCloseScreen() {
               <label key={r} className="flex items-center gap-2 py-1"><input type="checkbox" defaultChecked /> {r}</label>
             ))}
             <button onClick={() => printToast('Отчёты смены распечатаны')} className="mt-3 h-10 px-6 rounded-md bg-pos-blue">Печать отчётов</button>
+
+            {/* Модуль «офик закрыл кассу → сразу его N% за сегодня» */}
+            <div className="mt-6">
+              <div className="text-white/70 mb-2">Расчёт официантов ({commRate}% от личной выручки):</div>
+              {commRows.length === 0 ? (
+                <div className="text-white/40 text-sm">Нет закрытых заказов за смену.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="text-white/50 text-left"><tr>
+                    <th className="p-2">Официант</th><th className="text-right">Заказов</th><th className="text-right">Выручка</th><th className="text-right p-2">К выплате ({commRate}%)</th>
+                  </tr></thead>
+                  <tbody>
+                    {commRows.map((r) => (
+                      <tr key={r.waiter} className="border-b border-white/10">
+                        <td className="p-2">{r.waiter}</td>
+                        <td className="text-right">{r.orders}</td>
+                        <td className="text-right">{formatTenge(r.revenue)}</td>
+                        <td className="text-right p-2 font-semibold text-pos-accent">{formatTenge(r.commission)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="font-semibold"><td className="p-2">Итого</td><td></td><td className="text-right">{formatTenge(commRows.reduce((s, r) => s + r.revenue, 0))}</td><td className="text-right p-2 text-pos-accent">{formatTenge(commTotal)}</td></tr></tfoot>
+                </table>
+              )}
+              <div className="text-xs text-white/40 mt-1">Ставка задаётся в офисе (Настройки заведения). Выручка — по личным закрытым заказам официанта за смену.</div>
+            </div>
           </div>
         )}
 

@@ -85,6 +85,21 @@ export default function AttendanceScreen() {
           {(fStaff || fDate) && <button onClick={() => { setFStaff(''); setFDate('') }} className="h-9 px-3 rounded bg-white/10 text-sm">Сбросить</button>}
         </div>
 
+        {/* Сводка прихода (витрина «приход времени сотрудников») — по отфильтрованным явкам */}
+        {(() => {
+          const worked = visible.filter(({ r }) => r.type === 'Отработано')
+          const came = worked.filter(({ r }) => r.in.trim()).length
+          const late = worked.filter(({ r }) => deviation(r).late > 0).length
+          const absent = visible.filter(({ r }) => r.type === 'Прогул').length
+          return (
+            <div className="flex flex-wrap gap-3 mb-4 text-sm">
+              <span className="rounded-md bg-white/5 px-3 py-1.5">Пришло: <b className="text-pos-green">{came}</b></span>
+              <span className="rounded-md bg-white/5 px-3 py-1.5">Опозданий: <b className={late > 0 ? 'text-pos-rose' : 'text-white/70'}>{late}</b></span>
+              <span className="rounded-md bg-white/5 px-3 py-1.5">Прогулов: <b className={absent > 0 ? 'text-pos-rose' : 'text-white/70'}>{absent}</b></span>
+            </div>
+          )
+        })()}
+
         <table className="w-full max-w-4xl text-sm">
           <thead className="text-white/50 text-left"><tr>
             <th className="p-2">Сотрудник</th><th>Должность</th><th>Дата</th><th>План</th><th>Приход</th><th>Уход</th><th>Отклонение</th><th>Тип явки</th><th>Статус</th><th></th>

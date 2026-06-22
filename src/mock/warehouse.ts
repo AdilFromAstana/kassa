@@ -138,6 +138,23 @@ export function dishCost(dishId: string, ings: Ingredient[], over?: Record<strin
   return +card.reduce((s, it) => s + it.gross * (m[it.ingredientId]?.costPerUnit ?? 0), 0).toFixed(2)
 }
 
+// Себестоимость доп-ингредиентов модификатора (₸) на 1 единицу модификатора. 0 — если техкарты нет.
+// Замены (отриц. gross на снимаемый ингредиент + полож. на добавляемый) дают разницу себестоимости.
+export function modifierCost(optionId: string, ings: Ingredient[]): number {
+  const card = modifierTechCards[optionId]
+  if (!card) return 0
+  const m = byId(ings)
+  return +card.reduce((s, it) => s + it.gross * (m[it.ingredientId]?.costPerUnit ?? 0), 0).toFixed(2)
+}
+
+// Себестоимость строки заказа (₸): блюдо по техкарте + доп-ингредиенты модификаторов
+// (норма модификатора × его кол-во), всё × кол-во блюда. Это «опен-меню»: доп мясо поднимает себес.
+export function orderLineCost(line: OrderLine, ings: Ingredient[], over?: Record<string, TechCardItem[]>): number {
+  const base = dishCost(line.dishId, ings, over)
+  const mods = (line.modifiers ?? []).reduce((s, mo) => s + modifierCost(mo.optionId, ings) * (mo.qty || 1), 0)
+  return +((base + mods) * line.qty).toFixed(2)
+}
+
 // Сколько порций блюда можно собрать из текущих остатков. Infinity — если техкарты нет.
 export function dishMaxPortions(dishId: string, ings: Ingredient[], over?: Record<string, TechCardItem[]>): number {
   const card = over?.[dishId] ?? techCards[dishId]

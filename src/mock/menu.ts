@@ -81,6 +81,28 @@ export const dishes: Dish[] = [
   { id: 'd-cork', code: '9002', name: 'Пробковый сбор', price: 2000, vat: 16, groupId: 'g-service' },
 ]
 
+// Гидратация структуры меню с бэка (заменяет мок-данные на месте, сохраняя ссылки на массивы).
+// Все хелперы (dishesByGroup/findDish/…) читают эти же массивы → после гидратации видят данные сервера.
+// Fallback: если бэк недоступен/пусто — массивы остаются мок-данными.
+type MenuPayload = {
+  groups?: { id: string; name: string; page: number }[]
+  modifierGroups?: ModifierGroup[]
+  dishes?: { id: string; code: string; name: string; price: number; vat: number; groupId: string; color?: string | null; isWeight?: boolean | null; modifierGroupIds?: string[] }[]
+}
+export function hydrateMenu(data: MenuPayload | null | undefined) {
+  if (!data) return
+  if (data.groups?.length) menuGroups.splice(0, menuGroups.length, ...data.groups.map((g) => ({ id: g.id, name: g.name, page: (g.page as 1 | 2 | 3) })))
+  if (data.modifierGroups?.length) modifierGroups.splice(0, modifierGroups.length, ...data.modifierGroups)
+  if (data.dishes?.length) {
+    const norm: Dish[] = data.dishes.map((d) => ({
+      id: d.id, code: d.code, name: d.name, price: d.price, vat: d.vat as Dish['vat'], groupId: d.groupId,
+      color: d.color ?? undefined, isWeight: d.isWeight ?? undefined,
+      modifierGroupIds: d.modifierGroupIds && d.modifierGroupIds.length ? d.modifierGroupIds : undefined,
+    }))
+    dishes.splice(0, dishes.length, ...norm)
+  }
+}
+
 // Поиск по названию или коду (артикулу).
 export const searchDishes = (q: string) => {
   const s = q.trim().toLowerCase()
